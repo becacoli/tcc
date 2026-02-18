@@ -1,71 +1,79 @@
 import random
-from utils.geometry import distance, steer, is_collision_free
 
-class Node:
-    def __init__(self, x, y, parent=None):
-        self.x = x
-        self.y = y
-        self.parent = parent
+from algorithms.common import Node, reconstruct_bidirectional_path
+from utils.geometry import clamp_point, distance, is_collision_free, steer
+
 
 class RRTMerge:
-    def __init__(self, start, goal, map_size, max_iter=500, step_size=5, goal_sample_rate=0.05, connect_threshold=10, obstacles=None):
+    def __init__(self, start, goal, map_size, max_iter=500, step_size=5,
+                 goal_sample_rate=0.05, connect_threshold=10, obstacles=None):
         self.start = Node(*start)
         self.goal = Node(*goal)
         self.map_width, self.map_height = map_size
         self.max_iter = max_iter
         self.step_size = step_size
-        self.goal_sample_rate = goal_sample_rate 
+        self.goal_sample_rate = goal_sample_rate
         self.tree_start = [self.start]
         self.tree_goal = [self.goal]
         self.connect_threshold = connect_threshold
-        self.obstacles = obstacles if obstacles else []
+        self.obstacles = obstacles or []
+        self.iterations = 0
+        self.done = False
+        self.last_sample = None
 
     def get_random_point(self):
         if random.random() < self.goal_sample_rate:
-            return (self.goal.x, self.goal.y)
-        return (random.randint(0, self.map_width), random.randint(0, self.map_height))
+            return self.goal.pos
+        return (random.uniform(0, self.map_width), random.uniform(0, self.map_height))
 
-    def get_nearest_node(self, tree, point):
-        return min(tree, key=lambda node: distance((node.x, node.y), point))
+    def _nearest(self, tree, point):
+        return min(tree, key=lambda n: distance(n.pos, point))
 
-    def extend(self, tree, point):
-        nearest = self.get_nearest_node(tree, point)
-        new_point = steer((nearest.x, nearest.y), point, self.step_size)
+    def _extend(self, tree, point):
+        nearest = self._nearest(tree, point)
+        new_point = steer(nearest.pos, point, self.step_size)
+        new_point = clamp_point(new_point, (self.map_width, self.map_height))
 
-        if is_collision_free((nearest.x, nearest.y), new_point, self.obstacles):
+        if is_collision_free(nearest.pos, new_point, self.obstacles):
             new_node = Node(*new_point, parent=nearest)
             tree.append(new_node)
             return new_node
         return None
 
-    def check_connection(self, new_node, other_tree):
+    def _find_connection(self, new_node, other_tree):
         for node in other_tree:
-            if distance((new_node.x, new_node.y), (node.x, node.y)) < self.connect_threshold:
-                if is_collision_free((new_node.x, new_node.y), (node.x, node.y), self.obstacles):
+            if distance(new_node.pos, node.pos) < self.connect_threshold:
+                if is_collision_free(new_node.pos, node.pos, self.obstacles):
                     return node
         return None
 
-    def planning(self):
-        for _ in range(self.max_iter):
-            rand_point = self.get_random_point()
-            new_node = self.extend(self.tree_start, rand_point)
-            if new_node:
-                matched_node = self.check_connection(new_node, self.tree_goal)
-                if matched_node:
-                    print("Conectado via merge passivo!")
-                    return self.generate_path(new_node, matched_node)
+    def get_all_nodes(self):
+        return self.tree_start + self.tree_goal
 
-            self.tree_start, self.tree_goal = self.tree_goal, self.tree_start
+    def get_tree_groups(self):
+        return [self.tree_start, self.tree_goal]
 
+    def step(self):
+        if self.iterations >= self.max_iter:
+            self.done = True
+            return None
+
+        rand_point = self.get_random_point()
+        self.last_sample = rand_point
+        new_node = self._extend(self.tree_start, rand_point)
+        if new_node:
+            matched = self._find_connection(new_node, self.tree_goal)
+            if matched:
+                self.done = True
+                return reconstruct_bidirectional_path(new_node, matched)
+
+        self.tree_start, self.tree_goal = self.tree_goal, self.tree_start
+        self.iterations += 1
         return None
 
-    def generate_path(self, node_start, node_goal):
-        path_start = []
-        while node_start is not None:
-            path_start.append((node_start.x, node_start.y))
-            node_start = node_start.parent
-        path_goal = []
-        while node_goal is not None:
-            path_goal.append((node_goal.x, node_goal.y))
-            node_goal = node_goal.parent
-        return path_start[::-1] + path_goal
+    def planning(self):
+        while not self.done:
+            path = self.step()
+            if path:
+                return path
+        return None
