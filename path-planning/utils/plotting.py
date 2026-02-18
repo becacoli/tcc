@@ -12,7 +12,7 @@ def draw_obstacles(ax, obstacles):
 
 
 def plot_path(path, nodes, start, goal, obstacles=None, map_size=None,
-              title="RRT - Planejamento de Caminho"):
+              title="RRT - Planejamento de Caminho", block=True):
     fig, ax = plt.subplots(figsize=(8, 8))
     ax.set_aspect("equal")
 
@@ -36,4 +36,9 @@ def plot_path(path, nodes, start, goal, obstacles=None, map_size=None,
     if map_size:
         ax.set_xlim(0, map_size[0])
         ax.set_ylim(0, map_size[1])
-    plt.show()
+    
+    if block:
+        plt.show()  # Bloqueante - espera fechar
+    else:
+        plt.show(block=False)  # Não-bloqueante - mostra e continua
+        plt.pause(0.1)  # Pequena pausa para renderizar
