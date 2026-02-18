@@ -1,34 +1,39 @@
-import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import matplotlib.pyplot as plt
 
-def plot_path(path, tree, start, goal, obstacles=[]):
-    plt.figure(figsize=(8, 8))
-    ax = plt.gca()
-    ax.set_aspect('equal')
 
-    # Desenhar obstáculos
-    for obs in obstacles:
-        x_min, y_min, x_max, y_max = obs
-        rect = patches.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min, linewidth=1, edgecolor='k', facecolor='gray')
+def draw_obstacles(ax, obstacles):
+    for x_min, y_min, x_max, y_max in obstacles or []:
+        rect = patches.Rectangle(
+            (x_min, y_min), x_max - x_min, y_max - y_min,
+            linewidth=1, edgecolor="k", facecolor="gray",
+        )
         ax.add_patch(rect)
 
-    # Desenhar árvore
-    for node in tree:
+
+def plot_path(path, nodes, start, goal, obstacles=None, map_size=None,
+              title="RRT - Planejamento de Caminho"):
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.set_aspect("equal")
+
+    draw_obstacles(ax, obstacles)
+
+    for node in nodes:
         if node.parent is not None:
-            plt.plot([node.x, node.parent.x], [node.y, node.parent.y], color='lightblue', linewidth=0.8)
+            ax.plot([node.x, node.parent.x], [node.y, node.parent.y],
+                    color="lightblue", linewidth=0.8)
 
-    # Desenhar caminho
     if path:
-        x_vals, y_vals = zip(*path)
-        plt.plot(x_vals, y_vals, color='red', linewidth=2, label="Caminho")
+        xs, ys = zip(*path)
+        ax.plot(xs, ys, color="red", linewidth=2, label="Caminho")
 
-    # Início e objetivo
-    plt.plot(start[0], start[1], "go", markersize=10, label="Início")
-    plt.plot(goal[0], goal[1], "ro", markersize=10, label="Objetivo")
+    ax.plot(*start, "go", markersize=10, label="Inicio")
+    ax.plot(*goal, "ro", markersize=10, label="Objetivo")
 
-    plt.title("RRT - Planejamento de Caminho com Obstáculos")
-    plt.legend()
-    plt.grid(True)
-    plt.xlim(0, 100)
-    plt.ylim(0, 100)
+    ax.set_title(title)
+    ax.legend()
+    ax.grid(True)
+    if map_size:
+        ax.set_xlim(0, map_size[0])
+        ax.set_ylim(0, map_size[1])
     plt.show()
