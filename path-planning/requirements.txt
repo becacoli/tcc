@@ -2,3 +2,5 @@ numpy
 matplotlib
 scipy
 shapely
+coppeliasim-zmqremoteapi-client
+Pillow==10.4.0
