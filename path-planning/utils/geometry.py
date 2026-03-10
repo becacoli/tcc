@@ -24,16 +24,23 @@ def clamp_point(point, map_size):
     return (x, y)
 
 
-def is_collision_free(p1, p2, obstacles=None):
+def is_collision_free(p1, p2, obstacles=None, clearance=0.0):
     if not obstacles:
         return True
     for obs in obstacles:
-        if line_intersects_rect(p1, p2, obs):
+        if line_intersects_rect(p1, p2, obs, clearance=clearance):
             return False
     return True
 
 
-def line_intersects_rect(p1, p2, rect):
+def line_intersects_rect(p1, p2, rect, clearance=0.0):
+    x_min, y_min, x_max, y_max = rect
+    if clearance > 0:
+        x_min -= clearance
+        y_min -= clearance
+        x_max += clearance
+        y_max += clearance
+
     line = LineString([p1, p2])
-    rect_shape = box(*rect)
+    rect_shape = box(x_min, y_min, x_max, y_max)
     return line.intersects(rect_shape)
