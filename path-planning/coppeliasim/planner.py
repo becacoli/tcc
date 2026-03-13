@@ -260,9 +260,56 @@ def path_is_collision_free(path, obstacles):
     return True
 
 
+def shortcut_path(path, obstacles):
+    if not path:
+        return path
+
+    shortened = [path[0]]
+    anchor_idx = 0
+    while anchor_idx < len(path) - 1:
+        next_idx = len(path) - 1
+        while next_idx > anchor_idx + 1:
+            if is_collision_free(path[anchor_idx], path[next_idx], obstacles):
+                break
+            next_idx -= 1
+        shortened.append(path[next_idx])
+        anchor_idx = next_idx
+    return shortened
+
+
+def densify_path(path, max_spacing):
+    if not path or len(path) < 2:
+        return path
+
+    dense_path = [path[0]]
+    for idx in range(len(path) - 1):
+        start = path[idx]
+        end = path[idx + 1]
+        segment_length = math.hypot(end[0] - start[0], end[1] - start[1])
+        num_segments = max(1, int(math.ceil(segment_length / max_spacing)))
+        for step in range(1, num_segments + 1):
+            t = step / num_segments
+            dense_path.append(
+                (
+                    start[0] + (end[0] - start[0]) * t,
+                    start[1] + (end[1] - start[1]) * t,
+                )
+            )
+    return dense_path
+
+
+def postprocess_path(path, obstacles, waypoint_spacing):
+    if not path:
+        return path
+
+    simplified = shortcut_path(path, obstacles)
+    densified = densify_path(simplified, waypoint_spacing)
+    return densified if path_is_collision_free(densified, obstacles) else path
+
+
 def plan_collision_free_path(start, goal, map_size, obstacles, args):
     for _ in range(max(1, args.plan_attempts)):
         path = plan_path(start, goal, map_size, obstacles, args)
         if path and path_is_collision_free(path, obstacles):
-            return path
+            return postprocess_path(path, obstacles, waypoint_spacing=max(args.step_size * 0.5, 0.08))
     return None

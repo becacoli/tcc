@@ -43,6 +43,10 @@ def clamp(value, min_value, max_value):
     return max(min_value, min(value, max_value))
 
 
+STUCK_PROGRESS_TIMEOUT = 4.0
+STUCK_PROGRESS_EPS = 0.015
+
+
 def build_parser():
     parser = argparse.ArgumentParser(
         description="Plan with your Python RRT* and follow waypoints in CoppeliaSim (PioneerP3DX)."
@@ -102,8 +106,6 @@ def build_parser():
     parser.add_argument("--goal-tolerance", type=float, default=0.15)
     parser.add_argument("--dt", type=float, default=0.05)
 
-    parser.add_argument("--stuck-timeout", type=float, default=2.0)
-    parser.add_argument("--stuck-distance-eps", type=float, default=0.03)
     parser.add_argument("--max-replans", type=int, default=5)
     parser.add_argument("--strict-collision-check", action="store_true", default=False)
     parser.add_argument("--no-strict-collision-check", action="store_false", dest="strict_collision_check")
@@ -237,27 +239,23 @@ def main():
         return
 
     metrics = PathPlanningMetrics()
-    waypoints_world = [planner_to_world(px, py, map_size, world_bounds) for (px, py) in path]
-    print(f"Path found with {len(path)} waypoints.")
+    active_path = path
+    waypoints_world = [planner_to_world(px, py, map_size, world_bounds) for (px, py) in active_path]
+    print(f"Path found with {len(active_path)} waypoints.")
     print(f"Planning time: {planning_time:.4f} s")
 
     try:
         replans = 0
         waypoint_index = 0
-        prev_pos = sim.getObjectPosition(robot, -1)
         last_progress_time = time.time()
         execution_start_time = time.time()
         termination_reason = "completed"
+        best_waypoint_distance = None
 
         while waypoint_index < len(waypoints_world):
             wx, wy = waypoints_world[waypoint_index]
             pos = sim.getObjectPosition(robot, -1)
             ori = sim.getObjectOrientation(robot, -1)
-
-            step_progress = distance((prev_pos[0], prev_pos[1]), (pos[0], pos[1]))
-            if step_progress > args.stuck_distance_eps:
-                last_progress_time = time.time()
-            prev_pos = pos
 
             current_planner = world_to_planner(pos[0], pos[1], map_size, world_bounds)
             if any(point_inside_rect(current_planner, obs) for obs in obstacles):
@@ -270,9 +268,14 @@ def main():
             dx = wx - pos[0]
             dy = wy - pos[1]
             d = math.hypot(dx, dy)
+            if best_waypoint_distance is None or d < best_waypoint_distance - STUCK_PROGRESS_EPS:
+                best_waypoint_distance = d
+                last_progress_time = time.time()
             tol = args.goal_tolerance if waypoint_index == len(waypoints_world) - 1 else args.waypoint_tolerance
             if d <= tol:
                 waypoint_index += 1
+                best_waypoint_distance = None
+                last_progress_time = time.time()
                 continue
 
             if args.strict_collision_check and d > args.collision_min_distance:
@@ -306,7 +309,7 @@ def main():
             )
             time.sleep(args.dt)
 
-            if time.time() - last_progress_time > args.stuck_timeout:
+            if time.time() - last_progress_time > STUCK_PROGRESS_TIMEOUT:
                 if replans >= args.max_replans:
                     print("Stuck detected and max replans reached. Stopping.")
                     termination_reason = "max_replans_reached"
@@ -317,16 +320,17 @@ def main():
                 current_pos = sim.getObjectPosition(robot, -1)
                 start = world_to_planner(current_pos[0], current_pos[1], map_size, world_bounds)
                 replan_start_time = time.time()
-                path = plan_collision_free_path(start, goal, map_size, obstacles, args)
+                replanned_path = plan_collision_free_path(start, goal, map_size, obstacles, args)
                 planning_time += time.time() - replan_start_time
-                if not path:
+                if not replanned_path:
                     print("Replan failed: no path found.")
                     termination_reason = "replan_failed"
                     break
 
-                waypoints_world = [planner_to_world(px, py, map_size, world_bounds) for (px, py) in path]
+                active_path = replanned_path
+                waypoints_world = [planner_to_world(px, py, map_size, world_bounds) for (px, py) in active_path]
                 waypoint_index = 0
-                prev_pos = current_pos
+                best_waypoint_distance = None
                 last_progress_time = time.time()
                 print(f"Replan success. New path with {len(waypoints_world)} waypoints.")
 
@@ -351,11 +355,11 @@ def main():
             "planning_time": planning_time,
             "execution_time": execution_time,
             "replans": replans,
-            "num_waypoints": len(path),
-            "path_length": metrics.path_length(path),
-            "path_smoothness": metrics.path_smoothness(path),
-            "clearance": metrics.path_clearance(path, obstacles),
-            "straight_line_distance": metrics.euclidean_distance(path[0], path[-1]),
+            "num_waypoints": len(active_path),
+            "path_length": metrics.path_length(active_path),
+            "path_smoothness": metrics.path_smoothness(active_path),
+            "clearance": metrics.path_clearance(active_path, obstacles),
+            "straight_line_distance": metrics.euclidean_distance(active_path[0], active_path[-1]),
             "final_goal_error": final_err,
             "start_planner": [start[0], start[1]],
             "goal_planner": [goal[0], goal[1]],
