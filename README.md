@@ -1,6 +1,6 @@
 # Planejamento de Caminho com Algoritmos Baseados em Amostragem
 
-Este repositório contém a implementação e a avaliação de algoritmos de planejamento de caminho baseados em amostragem para um TCC, incluindo integração com o CoppeliaSim para navegação simulada de um robô móvel.
+Este repositório contém a implementação e a avaliação de algoritmos de planejamento de caminho baseados em amostragem para o TCC, incluindo integração com o CoppeliaSim para navegação simulada de um robô móvel.
 
 ## Visão Geral
 
