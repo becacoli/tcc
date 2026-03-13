@@ -7,8 +7,20 @@ PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from algorithms.informed_rrt_star import InformedRRTStar
+from algorithms.rrt import RRT
+from algorithms.rrt_connect import RRTConnect
 from algorithms.rrt_star import RRTStar
+from algorithms.rrt_star_smart import RRTStarSmart
 from utils.geometry import is_collision_free
+
+ALGORITHMS = {
+    "rrt": RRT,
+    "rrt_star": RRTStar,
+    "rrt_connect": RRTConnect,
+    "informed_rrt_star": InformedRRTStar,
+    "rrt_star_smart": RRTStarSmart,
+}
 
 
 def world_to_planner(x, y, map_size, world_bounds):
@@ -35,6 +47,15 @@ def normalize_alias(alias):
 
 def wall_name_matches(alias, prefix):
     return normalize_alias(alias).lower().startswith(prefix.lower())
+
+
+def transform_point(matrix, point):
+    x, y, z = point
+    return (
+        matrix[0] * x + matrix[1] * y + matrix[2] * z + matrix[3],
+        matrix[4] * x + matrix[5] * y + matrix[6] * z + matrix[7],
+        matrix[8] * x + matrix[9] * y + matrix[10] * z + matrix[11],
+    )
 
 
 def get_local_bbox_size(sim, handle):
@@ -123,6 +144,77 @@ def read_scene_walls_as_obstacles(sim, map_size, world_bounds, walls_prefix):
     return obstacles, labels
 
 
+def _component_boxes_from_shape_viz(sim, handle):
+    viz = sim.getShapeViz(handle, 0)
+    vertices = viz.get("vertices") or []
+    indices = viz.get("indices") or []
+    if not vertices or not indices:
+        return []
+
+    matrix = sim.getObjectMatrix(handle, -1)
+    points = [
+        transform_point(matrix, (vertices[i], vertices[i + 1], vertices[i + 2]))
+        for i in range(0, len(vertices), 3)
+    ]
+    adjacency = [set() for _ in range(len(points))]
+
+    for i in range(0, len(indices), 3):
+        tri = [int(indices[i]), int(indices[i + 1]), int(indices[i + 2])]
+        for idx in tri:
+            adjacency[idx].update(tri)
+
+    visited = set()
+    boxes = []
+    for start_idx in range(len(points)):
+        if start_idx in visited:
+            continue
+
+        stack = [start_idx]
+        visited.add(start_idx)
+        component = []
+        while stack:
+            idx = stack.pop()
+            component.append(points[idx])
+            for nxt in adjacency[idx]:
+                if nxt not in visited:
+                    visited.add(nxt)
+                    stack.append(nxt)
+
+        xs = [p[0] for p in component]
+        ys = [p[1] for p in component]
+        if xs and ys:
+            boxes.append((min(xs), min(ys), max(xs), max(ys)))
+    return boxes
+
+
+def read_obstacle_object_as_rects(sim, object_path, map_size, world_bounds):
+    handle = sim.getObject(object_path)
+    try:
+        world_rects = _component_boxes_from_shape_viz(sim, handle)
+    except Exception:
+        world_rects = []
+
+    if not world_rects:
+        world_rects = [rect_from_handle_world(sim, handle)]
+
+    obstacles = []
+    labels = []
+    alias = normalize_alias(sim.getObjectAlias(handle))
+    for x_min_w, y_min_w, x_max_w, y_max_w in world_rects:
+        p1 = world_to_planner(x_min_w, y_min_w, map_size, world_bounds)
+        p2 = world_to_planner(x_max_w, y_max_w, map_size, world_bounds)
+        obstacles.append(
+            (
+                min(p1[0], p2[0]),
+                min(p1[1], p2[1]),
+                max(p1[0], p2[0]),
+                max(p1[1], p2[1]),
+            )
+        )
+        labels.append(alias)
+    return obstacles, labels
+
+
 def resolve_goal_from_object(sim, goal_object_path, map_size, world_bounds):
     if not goal_object_path:
         return None
@@ -136,16 +228,26 @@ def resolve_goal_from_object(sim, goal_object_path, map_size, world_bounds):
 
 
 def plan_path(start, goal, map_size, obstacles, args):
-    planner = RRTStar(
-        start=start,
-        goal=goal,
-        map_size=map_size,
-        max_iter=args.max_iter,
-        step_size=args.step_size,
-        goal_sample_rate=args.goal_sample_rate,
-        obstacles=obstacles,
-        neighbor_radius=args.neighbor_radius,
-    )
+    algo_name = getattr(args, "algo", "rrt_star")
+    if algo_name not in ALGORITHMS:
+        raise ValueError(f"Unsupported algorithm: {algo_name}")
+
+    kwargs = {
+        "step_size": args.step_size,
+        "goal_sample_rate": args.goal_sample_rate,
+        "obstacles": obstacles,
+    }
+    if algo_name == "rrt_connect":
+        kwargs["max_samples"] = args.max_iter
+    else:
+        kwargs["max_iter"] = args.max_iter
+    if algo_name in {"rrt_star", "informed_rrt_star", "rrt_star_smart"}:
+        kwargs["neighbor_radius"] = args.neighbor_radius
+    if algo_name == "rrt_star_smart":
+        kwargs["beacon_sample_rate"] = getattr(args, "beacon_sample_rate", 0.35)
+        kwargs["beacon_radius"] = getattr(args, "beacon_radius", None)
+
+    planner = ALGORITHMS[algo_name](start, goal, map_size, **kwargs)
     return planner.planning()
 
 
