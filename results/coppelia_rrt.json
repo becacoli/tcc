@@ -1,0 +1,54 @@
+{
+  "label": "coppelia_rrt_star",
+  "seed": 1,
+  "success": true,
+  "termination_reason": "completed",
+  "planning_time": 0.1901700496673584,
+  "execution_time": 31.319579362869263,
+  "replans": 0,
+  "num_waypoints": 57,
+  "path_length": 13.087876395772009,
+  "path_smoothness": 33.44458034256375,
+  "clearance": 0.0432665033113413,
+  "straight_line_distance": 5.11289902794375,
+  "final_goal_error": 0.07799294059107902,
+  "start_planner": [
+    0.6891316995751822,
+    4.165705446156855
+  ],
+  "goal_planner": [
+    4.425,
+    0.675
+  ],
+  "world_bounds": [
+    -2.5,
+    2.5,
+    -2.5,
+    2.5
+  ],
+  "map_size": [
+    5.0,
+    5.0
+  ],
+  "obstacle_count": 6,
+  "wall_names": [
+    "wall_1",
+    "wall_2",
+    "wall_3",
+    "wall_4",
+    "wall_5",
+    "wall_6"
+  ],
+  "params": {
+    "max_iter": 10000,
+    "step_size": 0.25,
+    "goal_sample_rate": 0.1,
+    "neighbor_radius": 0.8,
+    "inflate": 0.18,
+    "linear_speed": 0.15,
+    "heading_stop_threshold": 0.45,
+    "waypoint_tolerance": 0.08,
+    "goal_tolerance": 0.1,
+    "strict_collision_check": false
+  }
+}
