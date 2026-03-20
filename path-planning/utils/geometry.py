@@ -6,6 +6,15 @@ def distance(p1, p2):
     return math.hypot(p2[0] - p1[0], p2[1] - p1[1])
 
 
+def respects_x_direction(p1, p2, mode="any", eps=1e-9):
+    dx = p2[0] - p1[0]
+    if mode == "right_only":
+        return dx >= -eps
+    if mode == "left_only":
+        return dx <= eps
+    return True
+
+
 def steer(from_point, to_point, step_size):
     dx = to_point[0] - from_point[0]
     dy = to_point[1] - from_point[1]
