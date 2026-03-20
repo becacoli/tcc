@@ -1,12 +1,12 @@
 import random
 
 from algorithms.common import Node, build_path
-from utils.geometry import clamp_point, distance, is_collision_free, steer
+from utils.geometry import clamp_point, distance, is_collision_free, respects_x_direction, steer
 
 
 class RRT:
     def __init__(self, start, goal, map_size, max_iter=500, step_size=5,
-                 goal_sample_rate=0.05, obstacles=None):
+                 goal_sample_rate=0.05, obstacles=None, x_direction="any"):
         self.start = Node(*start)
         self.goal = Node(*goal)
         self.map_width, self.map_height = map_size
@@ -15,6 +15,7 @@ class RRT:
         self.goal_sample_rate = goal_sample_rate
         self.tree = [self.start]
         self.obstacles = obstacles or []
+        self.x_direction = x_direction
         self.iterations = 0
         self.done = False
         self.last_sample = None
@@ -44,12 +45,19 @@ class RRT:
         new_point = steer(nearest.pos, rand_point, self.step_size)
         new_point = clamp_point(new_point, (self.map_width, self.map_height))
 
+        if not respects_x_direction(nearest.pos, new_point, self.x_direction):
+            self.iterations += 1
+            return None
+
         if is_collision_free(nearest.pos, new_point, self.obstacles):
             new_node = Node(*new_point, parent=nearest)
             self.tree.append(new_node)
 
             if distance(new_node.pos, self.goal.pos) <= self.step_size:
-                if is_collision_free(new_node.pos, self.goal.pos, self.obstacles):
+                if (
+                    respects_x_direction(new_node.pos, self.goal.pos, self.x_direction)
+                    and is_collision_free(new_node.pos, self.goal.pos, self.obstacles)
+                ):
                     goal_node = Node(self.goal.x, self.goal.y, parent=new_node)
                     self.done = True
                     return build_path(goal_node)

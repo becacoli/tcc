@@ -57,6 +57,24 @@ def create_test_scenarios():
                 (40, 30, 45, 70),
                 (55, 30, 60, 70)
             ]
+        },
+        'direita_reta': {
+            'start': (10, 50),
+            'goal': (90, 50),
+            'map_size': (100, 100),
+            'obstacles': [
+                (0, 0, 100, 35),
+                (0, 65, 100, 100)
+            ]
+        },
+        'esquerda_reta': {
+            'start': (90, 50),
+            'goal': (10, 50),
+            'map_size': (100, 100),
+            'obstacles': [
+                (0, 0, 100, 35),
+                (0, 65, 100, 100)
+            ]
         }
     }
     return scenarios

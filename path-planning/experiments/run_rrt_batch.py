@@ -73,6 +73,24 @@ SCENARIOS = {
             (70, 35, 75, 55),
         ],
     },
+    "direita_reta": {
+        "start": (10, 50),
+        "goal": (90, 50),
+        "map_size": (100, 100),
+        "obstacles": [
+            (0, 0, 100, 35),
+            (0, 65, 100, 100),
+        ],
+    },
+    "esquerda_reta": {
+        "start": (90, 50),
+        "goal": (10, 50),
+        "map_size": (100, 100),
+        "obstacles": [
+            (0, 0, 100, 35),
+            (0, 65, 100, 100),
+        ],
+    },
     "vazio": {
         "start": (10, 10),
         "goal": (90, 90),
@@ -88,6 +106,8 @@ def _build_kwargs(name, args):
         base["max_samples"] = args.max_iter
     else:
         base["max_iter"] = args.max_iter
+    if name == "rrt":
+        base["x_direction"] = args.x_direction
     if name in {"rrt_star", "informed_rrt_star", "rrt_star_smart"}:
         base["neighbor_radius"] = args.neighbor_radius
     if name == "rrt_merged":
@@ -125,7 +145,7 @@ def main():
         "--scenario",
         choices=list(SCENARIOS),
         default="default",
-        help="Cenario a usar (default, simples, moderado, complexo, corredor, vazio)",
+        help="Cenario a usar (veja --list-scenarios para a lista completa)",
     )
     parser.add_argument("--list-scenarios", action="store_true", help="Lista os cenarios disponiveis e sai")
     parser.add_argument("--runs", type=int, default=10)
@@ -133,6 +153,7 @@ def main():
     parser.add_argument("--max-iter", type=int, default=500)
     parser.add_argument("--step-size", type=float, default=5)
     parser.add_argument("--goal-sample-rate", type=float, default=0.05)
+    parser.add_argument("--x-direction", choices=["any", "right_only", "left_only"], default="any")
     parser.add_argument("--neighbor-radius", type=float, default=15)
     parser.add_argument("--connect-threshold", type=float, default=10)
     parser.add_argument("--beacon-sample-rate", type=float, default=0.35)
@@ -149,6 +170,9 @@ def main():
         help="Arquivo CSV de saida (padrao: ../results/<algo>_<cenario>_metrics.csv)",
     )
     args = parser.parse_args()
+
+    if args.x_direction != "any" and args.algo != "rrt":
+        parser.error("--x-direction atualmente e suportado apenas com --algo rrt")
 
     if args.list_scenarios:
         print("Cenarios disponiveis:")
@@ -169,6 +193,8 @@ def main():
     print(f"Cenario: {args.scenario}")
     print(f"  Start: {start}, Goal: {goal}, Map: {map_size}")
     print(f"  Obstaculos: {len(obstacles)}")
+    if args.x_direction != "any":
+        print(f"  X direction: {args.x_direction}")
     print()
 
     metrics = PathPlanningMetrics()
@@ -211,6 +237,7 @@ def main():
             "seed": seed,
             "algorithm": args.algo,
             "scenario": args.scenario,
+            "x_direction": args.x_direction,
             "success": found,
             "planning_time": planning_time,
             "num_nodes": num_nodes,

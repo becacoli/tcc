@@ -231,12 +231,17 @@ def plan_path(start, goal, map_size, obstacles, args):
     algo_name = getattr(args, "algo", "rrt_star")
     if algo_name not in ALGORITHMS:
         raise ValueError(f"Unsupported algorithm: {algo_name}")
+    x_direction = getattr(args, "x_direction", "any")
+    if x_direction != "any" and algo_name != "rrt":
+        raise ValueError("x_direction is currently supported only for the rrt algorithm")
 
     kwargs = {
         "step_size": args.step_size,
         "goal_sample_rate": args.goal_sample_rate,
         "obstacles": obstacles,
     }
+    if algo_name == "rrt":
+        kwargs["x_direction"] = x_direction
     if algo_name == "rrt_connect":
         kwargs["max_samples"] = args.max_iter
     else:

@@ -46,6 +46,12 @@ def clamp(value, min_value, max_value):
 STUCK_PROGRESS_TIMEOUT = 4.0
 STUCK_PROGRESS_EPS = 0.015
 
+GOAL_CASE_OBJECTS = {
+    "none": None,
+    "direita": "/GoalDireita",
+    "esquerda": "/GoalEsquerda",
+}
+
 
 def build_parser():
     parser = argparse.ArgumentParser(
@@ -61,6 +67,7 @@ def build_parser():
     parser.add_argument("--left-motor-path", default="/PioneerP3DX/leftMotor")
     parser.add_argument("--right-motor-path", default="/PioneerP3DX/rightMotor")
     parser.add_argument("--goal-object", default="/GoalConfiguration")
+    parser.add_argument("--goal-case", choices=list(GOAL_CASE_OBJECTS), default="none")
     parser.add_argument("--walls-object", default="/wall_6")
     parser.add_argument(
         "--algo",
@@ -91,6 +98,7 @@ def build_parser():
     parser.add_argument("--max-iter", type=int, default=5000)
     parser.add_argument("--step-size", type=float, default=0.6)
     parser.add_argument("--goal-sample-rate", type=float, default=0.1)
+    parser.add_argument("--x-direction", choices=["any", "right_only", "left_only"], default="any")
     parser.add_argument("--neighbor-radius", type=float, default=0.8)
     parser.add_argument("--inflate", type=float, default=0.26)
     parser.add_argument("--beacon-sample-rate", type=float, default=0.35)
@@ -123,6 +131,12 @@ def compute_obstacles_and_goal(args):
     return cfg["map_size"], cfg["obstacles"], cfg["goal"]
 
 
+def resolve_goal_object_path(args):
+    if args.goal_case != "none":
+        return GOAL_CASE_OBJECTS[args.goal_case]
+    return args.goal_object
+
+
 def set_wheel_speeds(sim, left_motor, right_motor, v, omega, wheel_radius, wheel_base):
     left_lin = v - (wheel_base * omega / 2.0)
     right_lin = v + (wheel_base * omega / 2.0)
@@ -132,6 +146,8 @@ def set_wheel_speeds(sim, left_motor, right_motor, v, omega, wheel_radius, wheel
 
 def main():
     args = build_parser().parse_args()
+    if args.x_direction != "any" and args.algo != "rrt":
+        raise ValueError("--x-direction atualmente e suportado apenas com --algo rrt")
     random.seed(args.seed)
 
     world_bounds = (args.world_min_x, args.world_max_x, args.world_min_y, args.world_max_y)
@@ -159,12 +175,18 @@ def main():
     else:
         map_size = scenario_map_size
 
+    goal_object_path = resolve_goal_object_path(args)
+
     if args.scenario == "none":
         if args.goal_world_x is not None and args.goal_world_y is not None:
             goal = world_to_planner(args.goal_world_x, args.goal_world_y, map_size, world_bounds)
         else:
             goal = world_to_planner(args.goal_x, args.goal_y, map_size, world_bounds)
-            goal_from_object = resolve_goal_from_object(sim, args.goal_object, map_size, world_bounds)
+            goal_from_object = resolve_goal_from_object(sim, goal_object_path, map_size, world_bounds)
+            if args.goal_case != "none" and goal_from_object is None:
+                raise RuntimeError(
+                    f"Goal case '{args.goal_case}' requires object '{goal_object_path}' to exist in the scene."
+                )
             if goal_from_object is not None:
                 goal = goal_from_object
 
@@ -216,8 +238,12 @@ def main():
     print(f"  goal  (planner): ({goal[0]:.2f}, {goal[1]:.2f})")
     print(f"  seed: {args.seed}")
     print(f"  algorithm: {args.algo}")
-    if args.goal_object:
-        print(f"  goal object: {args.goal_object}")
+    if args.x_direction != "any":
+        print(f"  x direction: {args.x_direction}")
+    if args.goal_case != "none":
+        print(f"  goal case: {args.goal_case}")
+    if goal_object_path:
+        print(f"  goal object: {goal_object_path}")
     if args.walls_object:
         print(f"  walls object: {args.walls_object}")
     print(f"  planner backend: python_{args.algo}")
@@ -371,6 +397,7 @@ def main():
                 "max_iter": args.max_iter,
                 "step_size": args.step_size,
                 "goal_sample_rate": args.goal_sample_rate,
+                "x_direction": args.x_direction,
                 "neighbor_radius": args.neighbor_radius,
                 "inflate": args.inflate,
                 "linear_speed": args.linear_speed,
