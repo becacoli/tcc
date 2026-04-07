@@ -1,157 +1,94 @@
 import argparse
-import json
-import math
 import os
-import random
 import sys
-import time
 
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
+from shapely.geometry import Polygon
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from experiments.run_rrt_batch import SCENARIOS
-from experiments.metrics import PathPlanningMetrics
-from utils.geometry import distance, is_collision_free
-
-from planner import (
-    compute_world_bounds_from_handle,
-    inflate_obstacles,
-    plan_collision_free_path,
-    planner_to_world,
-    point_inside_rect,
-    read_obstacle_object_as_rects,
-    read_scene_walls_as_obstacles,
-    resolve_goal_from_object,
-    try_get_object_by_alias,
-    world_to_planner,
+from planner_isolated import (
+    add_planner_arguments,
+    extract_planning_context,
+    plan_path_independent,
+    planner_path_to_world,
 )
+from wheel_controller import add_controller_arguments, follow_world_path
+from utils.plotting import plot_planner_tree
 
 
-def normalize_angle(angle):
-    while angle > math.pi:
-        angle -= 2.0 * math.pi
-    while angle < -math.pi:
-        angle += 2.0 * math.pi
-    return angle
+def _inflate_rect(rect, inflate_by):
+    x_min, y_min, x_max, y_max = rect
+    return (x_min - inflate_by, y_min - inflate_by, x_max + inflate_by, y_max + inflate_by)
 
 
-def clamp(value, min_value, max_value):
-    return max(min_value, min(value, max_value))
+def build_control_obstacles_world(context, args):
+    """Constrói obstáculos no mundo para validação de segurança no controlador."""
+    # Nao inflar aqui: o planner ja considera robot_radius.
+    # No controlador usamos apenas control_clearance para evitar dupla inflacao.
+    inflate_by = 0.0
+    details = context.metadata.get("obstacle_details", [])
 
+    if getattr(args, "obstacle_model", "aabb") == "polygon" and details:
+        polygons = []
+        for obs in details:
+            vertices = obs.get("vertices_xy", [])
+            if len(vertices) >= 3:
+                poly = Polygon(vertices)
+                if inflate_by > 0:
+                    poly = poly.buffer(inflate_by, join_style=2)
+                polygons.append(poly)
+        return polygons
 
-STUCK_PROGRESS_TIMEOUT = 4.0
-STUCK_PROGRESS_EPS = 0.015
+    rects = []
+    for obs in details:
+        b = obs.get("raw_bounds", obs.get("bounds", {}))
+        if {"x_min", "y_min", "x_max", "y_max"}.issubset(b):
+            rects.append((b["x_min"], b["y_min"], b["x_max"], b["y_max"]))
 
-GOAL_CASE_OBJECTS = {
-    "none": None,
-    "direita": "/GoalDireita",
-    "esquerda": "/GoalEsquerda",
-}
+    if not rects:
+        rects = context.get_obstacles_as_rects()
+
+    if inflate_by > 0:
+        rects = [_inflate_rect(r, inflate_by) for r in rects]
+    return rects
 
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        description="Plan with your Python RRT* and follow waypoints in CoppeliaSim (PioneerP3DX)."
+        description=(
+            "Navegacao no CoppeliaSim com arquitetura isolada: "
+            "(1) extracao de contexto e planejamento independente "
+            "(2) controle de rodas separado"
+        )
     )
+
+    # Conexao e objetos de cena
     parser.add_argument("--host", default="localhost")
     parser.add_argument("--port", type=int, default=23000)
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--save-run-json", default=None)
-    parser.add_argument("--run-label", default="coppelia_rrt_star")
-
     parser.add_argument("--robot-path", default="/PioneerP3DX")
     parser.add_argument("--left-motor-path", default="/PioneerP3DX/leftMotor")
     parser.add_argument("--right-motor-path", default="/PioneerP3DX/rightMotor")
     parser.add_argument("--goal-object", default="/GoalConfiguration")
-    parser.add_argument("--goal-case", choices=list(GOAL_CASE_OBJECTS), default="none")
-    parser.add_argument("--walls-object", default="/wall_6")
-    parser.add_argument(
-        "--algo",
-        choices=["rrt", "rrt_star", "rrt_connect", "informed_rrt_star", "rrt_star_smart"],
-        default="rrt_star",
-    )
 
-    parser.add_argument("--scenario", choices=list(SCENARIOS) + ["none"], default="none")
-    parser.add_argument("--map-width", type=float, default=None)
-    parser.add_argument("--map-height", type=float, default=None)
-    parser.add_argument("--goal-x", type=float, default=1.25)
-    parser.add_argument("--goal-y", type=float, default=-1.60)
-    parser.add_argument("--goal-world-x", type=float, default=None)
-    parser.add_argument("--goal-world-y", type=float, default=None)
+    # Planner layer args (isolated module)
+    add_planner_arguments(parser)
 
-    parser.add_argument("--world-min-x", type=float, default=-5.0)
-    parser.add_argument("--world-max-x", type=float, default=5.0)
-    parser.add_argument("--world-min-y", type=float, default=-5.0)
-    parser.add_argument("--world-max-y", type=float, default=5.0)
-    parser.add_argument("--walls-prefix", default="wall_")
-    parser.add_argument("--use-scene-walls", action="store_true", default=True)
-    parser.add_argument("--no-scene-walls", action="store_false", dest="use_scene_walls")
-    parser.add_argument("--floor-alias", default="floor")
-    parser.add_argument("--auto-world-bounds", action="store_true", default=True)
-    parser.add_argument("--no-auto-world-bounds", action="store_false", dest="auto_world_bounds")
-    parser.add_argument("--world-margin", type=float, default=0.0)
+    # Wheel-control layer args (separate module)
+    add_controller_arguments(parser)
 
-    parser.add_argument("--max-iter", type=int, default=5000)
-    parser.add_argument("--step-size", type=float, default=0.6)
-    parser.add_argument("--goal-sample-rate", type=float, default=0.1)
-    parser.add_argument("--x-direction", choices=["any", "right_only", "left_only"], default="any")
-    parser.add_argument("--neighbor-radius", type=float, default=0.8)
-    parser.add_argument("--inflate", type=float, default=0.26)
-    parser.add_argument("--beacon-sample-rate", type=float, default=0.35)
-    parser.add_argument("--beacon-radius", type=float, default=None)
-
-    parser.add_argument("--wheel-radius", type=float, default=0.0975)
-    parser.add_argument("--wheel-base", type=float, default=0.381)
-    parser.add_argument("--linear-speed", type=float, default=0.25)
-    parser.add_argument("--angular-gain", type=float, default=3.0)
-    parser.add_argument("--max-ang-speed", type=float, default=2.0)
-    parser.add_argument("--heading-stop-threshold", type=float, default=0.7)
-    parser.add_argument("--waypoint-tolerance", type=float, default=0.2)
-    parser.add_argument("--goal-tolerance", type=float, default=0.15)
-    parser.add_argument("--dt", type=float, default=0.05)
-
-    parser.add_argument("--max-replans", type=int, default=5)
-    parser.add_argument("--strict-collision-check", action="store_true", default=False)
-    parser.add_argument("--no-strict-collision-check", action="store_false", dest="strict_collision_check")
-    parser.add_argument("--collision-lookahead", type=float, default=0.18)
-    parser.add_argument("--collision-min-distance", type=float, default=0.05)
-    parser.add_argument("--plan-attempts", type=int, default=5)
+    # Diagnostico
+    parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--plot-planner", action="store_true")
+    parser.add_argument("--plot-block", action="store_true")
     return parser
-
-
-def compute_obstacles_and_goal(args):
-    if args.scenario == "none":
-        return (1.0, 1.0), [], (args.goal_x, args.goal_y)
-
-    cfg = SCENARIOS[args.scenario]
-    return cfg["map_size"], cfg["obstacles"], cfg["goal"]
-
-
-def resolve_goal_object_path(args):
-    if args.goal_case != "none":
-        return GOAL_CASE_OBJECTS[args.goal_case]
-    return args.goal_object
-
-
-def set_wheel_speeds(sim, left_motor, right_motor, v, omega, wheel_radius, wheel_base):
-    left_lin = v - (wheel_base * omega / 2.0)
-    right_lin = v + (wheel_base * omega / 2.0)
-    sim.setJointTargetVelocity(left_motor, left_lin / wheel_radius)
-    sim.setJointTargetVelocity(right_motor, right_lin / wheel_radius)
 
 
 def main():
     args = build_parser().parse_args()
-    if args.x_direction != "any" and args.algo != "rrt":
-        raise ValueError("--x-direction atualmente e suportado apenas com --algo rrt")
-    random.seed(args.seed)
-
-    world_bounds = (args.world_min_x, args.world_max_x, args.world_min_y, args.world_max_y)
-    scenario_map_size, scenario_obstacles, goal = compute_obstacles_and_goal(args)
 
     client = RemoteAPIClient(args.host, args.port)
     sim = client.getObject("sim")
@@ -160,274 +97,67 @@ def main():
     left_motor = sim.getObject(args.left_motor_path)
     right_motor = sim.getObject(args.right_motor_path)
 
-    if args.auto_world_bounds:
-        floor_handle = try_get_object_by_alias(sim, args.floor_alias)
-        if floor_handle != -1:
-            auto_bounds = compute_world_bounds_from_handle(sim, floor_handle, margin=args.world_margin)
-            if (auto_bounds[1] - auto_bounds[0]) > 0 and (auto_bounds[3] - auto_bounds[2]) > 0:
-                world_bounds = auto_bounds
-
-    world_map_size = (world_bounds[1] - world_bounds[0], world_bounds[3] - world_bounds[2])
-    if args.map_width is not None and args.map_height is not None:
-        map_size = (args.map_width, args.map_height)
-    elif args.scenario == "none":
-        map_size = world_map_size
-    else:
-        map_size = scenario_map_size
-
-    goal_object_path = resolve_goal_object_path(args)
-
-    if args.scenario == "none":
-        if args.goal_world_x is not None and args.goal_world_y is not None:
-            goal = world_to_planner(args.goal_world_x, args.goal_world_y, map_size, world_bounds)
-        else:
-            goal = world_to_planner(args.goal_x, args.goal_y, map_size, world_bounds)
-            goal_from_object = resolve_goal_from_object(sim, goal_object_path, map_size, world_bounds)
-            if args.goal_case != "none" and goal_from_object is None:
-                raise RuntimeError(
-                    f"Goal case '{args.goal_case}' requires object '{goal_object_path}' to exist in the scene."
-                )
-            if goal_from_object is not None:
-                goal = goal_from_object
-
-    obstacles = scenario_obstacles
-    wall_names = []
-    if args.scenario == "none":
-        try:
-            if args.walls_object:
-                obstacles, wall_names = read_obstacle_object_as_rects(
-                    sim=sim,
-                    object_path=args.walls_object,
-                    map_size=map_size,
-                    world_bounds=world_bounds,
-                )
-            elif args.use_scene_walls:
-                obstacles, wall_names = read_scene_walls_as_obstacles(
-                    sim=sim,
-                    map_size=map_size,
-                    world_bounds=world_bounds,
-                    walls_prefix=args.walls_prefix,
-                )
-        except Exception as exc:
-            print(f"Warning: failed to read scene obstacles ({exc}). Using scenario obstacles.")
-    elif args.use_scene_walls:
-        try:
-            obstacles, wall_names = read_scene_walls_as_obstacles(
-                sim=sim,
-                map_size=map_size,
-                world_bounds=world_bounds,
-                walls_prefix=args.walls_prefix,
-            )
-        except Exception as exc:
-            print(f"Warning: failed to read scene walls ({exc}). Using scenario obstacles.")
-
-    obstacles = inflate_obstacles(obstacles, args.inflate, map_size)
-
-    robot_pos = sim.getObjectPosition(robot, -1)
-    start = world_to_planner(robot_pos[0], robot_pos[1], map_size, world_bounds)
+    # 1) PLANEJAMENTO ISOLADO
+    context = extract_planning_context(sim, args)
+    path_planner, plan_metrics = plan_path_independent(context, args)
 
     print("Connected to CoppeliaSim")
-    print(f"  robot: {args.robot_path}")
-    print(
-        "  world bounds: "
-        f"x[{world_bounds[0]:.2f}, {world_bounds[1]:.2f}] "
-        f"y[{world_bounds[2]:.2f}, {world_bounds[3]:.2f}]"
-    )
-    print(f"  map size (planner): ({map_size[0]:.2f}, {map_size[1]:.2f})")
-    print(f"  start (planner): ({start[0]:.2f}, {start[1]:.2f})")
-    print(f"  goal  (planner): ({goal[0]:.2f}, {goal[1]:.2f})")
-    print(f"  seed: {args.seed}")
+    print("Planner layer (isolated):")
     print(f"  algorithm: {args.algo}")
-    if args.x_direction != "any":
-        print(f"  x direction: {args.x_direction}")
-    if args.goal_case != "none":
-        print(f"  goal case: {args.goal_case}")
-    if goal_object_path:
-        print(f"  goal object: {goal_object_path}")
-    if args.walls_object:
-        print(f"  walls object: {args.walls_object}")
-    print(f"  planner backend: python_{args.algo}")
-    print(f"  obstacles: {len(obstacles)}")
-    print(f"  obstacle inflate: {args.inflate:.2f}")
-    if wall_names:
-        print(f"  scene walls detected: {', '.join(sorted(set(wall_names)))}")
+    print(f"  obstacle model: {args.obstacle_model}")
+    print(f"  robot radius: {args.robot_radius:.3f}")
+    print(f"  planning time: {plan_metrics['planning_time_s']:.4f} s")
+    print(f"  iterations: {plan_metrics['iterations']}")
+    print(f"  obstacles: {plan_metrics['num_obstacles']}")
+    if "raw_waypoints" in plan_metrics:
+        print(f"  raw waypoints: {plan_metrics['raw_waypoints']}")
+    if "processed_waypoints" in plan_metrics:
+        print(f"  processed waypoints: {plan_metrics['processed_waypoints']}")
 
-    if any(point_inside_rect(start, obs) for obs in obstacles):
-        print("Warning: start is inside an obstacle.")
-    if any(point_inside_rect(goal, obs) for obs in obstacles):
-        print("Warning: goal is inside an obstacle.")
-
-    planning_start_time = time.time()
-    path = plan_collision_free_path(start, goal, map_size, obstacles, args)
-    planning_time = time.time() - planning_start_time
-    if not path:
-        print("No path found with current parameters.")
+    if not path_planner:
+        print("No path found in planner layer.")
         return
 
-    metrics = PathPlanningMetrics()
-    active_path = path
-    waypoints_world = [planner_to_world(px, py, map_size, world_bounds) for (px, py) in active_path]
-    print(f"Path found with {len(active_path)} waypoints.")
-    print(f"Planning time: {planning_time:.4f} s")
+    if args.plot_planner:
+        planner_obj = plan_metrics.get("planner_obj")
+        tree_groups = planner_obj.get_tree_groups() if planner_obj is not None else []
+        plot_planner_tree(
+            path=path_planner,
+            tree_groups=tree_groups,
+            start=plan_metrics["start"],
+            goal=plan_metrics["goal"],
+            obstacles=plan_metrics.get("planner_obstacles", []),
+            map_size=plan_metrics.get("map_size"),
+            title=f"{args.algo.upper()} - Tree + Path",
+            block=args.plot_block,
+        )
 
-    try:
-        replans = 0
-        waypoint_index = 0
-        last_progress_time = time.time()
-        execution_start_time = time.time()
-        termination_reason = "completed"
-        best_waypoint_distance = None
+    # 2) CONTROLE DE RODAS (SEPARADO)
+    waypoints_world = planner_path_to_world(path_planner, context)
 
-        while waypoint_index < len(waypoints_world):
-            wx, wy = waypoints_world[waypoint_index]
-            pos = sim.getObjectPosition(robot, -1)
-            ori = sim.getObjectOrientation(robot, -1)
+    if args.debug:
+        print(f"Path found with {len(path_planner)} waypoints (planner coords).")
+        print("First waypoints in world coords:")
+        for idx, (wx, wy) in enumerate(waypoints_world[:5]):
+            print(f"  {idx}: ({wx:.3f}, {wy:.3f})")
 
-            current_planner = world_to_planner(pos[0], pos[1], map_size, world_bounds)
-            if any(point_inside_rect(current_planner, obs) for obs in obstacles):
-                if args.strict_collision_check:
-                    print("Collision-risk detected: robot entered occupied area. Stopping (strict mode).")
-                    termination_reason = "strict_collision_occupied_area"
-                    break
-                last_progress_time = 0.0
+    control_obstacles_world = build_control_obstacles_world(context, args)
+    control_result = follow_world_path(
+        sim,
+        robot,
+        left_motor,
+        right_motor,
+        waypoints_world,
+        args,
+        obstacles_world=control_obstacles_world,
+    )
 
-            dx = wx - pos[0]
-            dy = wy - pos[1]
-            d = math.hypot(dx, dy)
-            if best_waypoint_distance is None or d < best_waypoint_distance - STUCK_PROGRESS_EPS:
-                best_waypoint_distance = d
-                last_progress_time = time.time()
-            tol = args.goal_tolerance if waypoint_index == len(waypoints_world) - 1 else args.waypoint_tolerance
-            if d <= tol:
-                waypoint_index += 1
-                best_waypoint_distance = None
-                last_progress_time = time.time()
-                continue
-
-            if args.strict_collision_check and d > args.collision_min_distance:
-                lookahead = min(args.collision_lookahead, d)
-                ux = dx / d
-                uy = dy / d
-                lx = pos[0] + ux * lookahead
-                ly = pos[1] + uy * lookahead
-                lookahead_planner = world_to_planner(lx, ly, map_size, world_bounds)
-                if not is_collision_free(current_planner, lookahead_planner, obstacles):
-                    print("Collision-risk detected on local lookahead. Stopping (strict mode).")
-                    termination_reason = "strict_collision_lookahead"
-                    break
-
-            target_heading = math.atan2(dy, dx)
-            heading_error = normalize_angle(target_heading - ori[2])
-
-            omega = clamp(args.angular_gain * heading_error, -args.max_ang_speed, args.max_ang_speed)
-            v = args.linear_speed * max(0.0, 1.0 - abs(heading_error) / math.pi)
-            if abs(heading_error) > args.heading_stop_threshold:
-                v = 0.0
-
-            set_wheel_speeds(
-                sim,
-                left_motor,
-                right_motor,
-                v,
-                omega,
-                args.wheel_radius,
-                args.wheel_base,
-            )
-            time.sleep(args.dt)
-
-            if time.time() - last_progress_time > STUCK_PROGRESS_TIMEOUT:
-                if replans >= args.max_replans:
-                    print("Stuck detected and max replans reached. Stopping.")
-                    termination_reason = "max_replans_reached"
-                    break
-
-                replans += 1
-                print(f"Stuck detected. Replanning... ({replans}/{args.max_replans})")
-                current_pos = sim.getObjectPosition(robot, -1)
-                start = world_to_planner(current_pos[0], current_pos[1], map_size, world_bounds)
-                replan_start_time = time.time()
-                replanned_path = plan_collision_free_path(start, goal, map_size, obstacles, args)
-                planning_time += time.time() - replan_start_time
-                if not replanned_path:
-                    print("Replan failed: no path found.")
-                    termination_reason = "replan_failed"
-                    break
-
-                active_path = replanned_path
-                waypoints_world = [planner_to_world(px, py, map_size, world_bounds) for (px, py) in active_path]
-                waypoint_index = 0
-                best_waypoint_distance = None
-                last_progress_time = time.time()
-                print(f"Replan success. New path with {len(waypoints_world)} waypoints.")
-
-        set_wheel_speeds(sim, left_motor, right_motor, 0.0, 0.0, args.wheel_radius, args.wheel_base)
-        final_pos = sim.getObjectPosition(robot, -1)
-        final_err = distance((final_pos[0], final_pos[1]), waypoints_world[-1])
-        execution_time = time.time() - execution_start_time
-        failure_reasons = {
-            "max_replans_reached",
-            "replan_failed",
-            "strict_collision_occupied_area",
-            "strict_collision_lookahead",
-        }
-        success = final_err <= args.goal_tolerance and termination_reason not in failure_reasons
-        print(f"Done. Final goal error: {final_err:.3f} m")
-
-        run_result = {
-            "label": args.run_label,
-            "seed": args.seed,
-            "success": success,
-            "termination_reason": termination_reason,
-            "planning_time": planning_time,
-            "execution_time": execution_time,
-            "replans": replans,
-            "num_waypoints": len(active_path),
-            "path_length": metrics.path_length(active_path),
-            "path_smoothness": metrics.path_smoothness(active_path),
-            "clearance": metrics.path_clearance(active_path, obstacles),
-            "straight_line_distance": metrics.euclidean_distance(active_path[0], active_path[-1]),
-            "final_goal_error": final_err,
-            "start_planner": [start[0], start[1]],
-            "goal_planner": [goal[0], goal[1]],
-            "world_bounds": list(world_bounds),
-            "map_size": list(map_size),
-            "obstacle_count": len(obstacles),
-            "wall_names": sorted(set(wall_names)),
-            "params": {
-                "max_iter": args.max_iter,
-                "step_size": args.step_size,
-                "goal_sample_rate": args.goal_sample_rate,
-                "x_direction": args.x_direction,
-                "neighbor_radius": args.neighbor_radius,
-                "inflate": args.inflate,
-                "linear_speed": args.linear_speed,
-                "heading_stop_threshold": args.heading_stop_threshold,
-                "waypoint_tolerance": args.waypoint_tolerance,
-                "goal_tolerance": args.goal_tolerance,
-                "strict_collision_check": args.strict_collision_check,
-            },
-        }
-
-        print("Run summary:")
-        print(f"  success: {run_result['success']}")
-        print(f"  replans: {run_result['replans']}")
-        print(f"  path length: {run_result['path_length']:.3f}")
-        print(f"  smoothness: {run_result['path_smoothness']:.3f}")
-        print(f"  clearance: {run_result['clearance']:.3f}")
-        print(f"  execution time: {run_result['execution_time']:.3f} s")
-
-        if args.save_run_json:
-            output_path = os.path.normpath(args.save_run_json)
-            output_dir = os.path.dirname(output_path)
-            if output_dir:
-                os.makedirs(output_dir, exist_ok=True)
-            with open(output_path, "w", encoding="utf-8") as f:
-                json.dump(run_result, f, indent=2)
-            print(f"Run metrics saved to: {output_path}")
-
-    except KeyboardInterrupt:
-        set_wheel_speeds(sim, left_motor, right_motor, 0.0, 0.0, args.wheel_radius, args.wheel_base)
-        print("Interrupted by user. Robot stopped.")
+    print("Control layer (wheel execution):")
+    print(f"  success: {control_result['success']}")
+    print(f"  reason: {control_result['reason']}")
+    print(f"  execution time: {control_result['execution_time_s']:.3f} s")
+    if "final_error_m" in control_result:
+        print(f"  final goal error: {control_result['final_error_m']:.3f} m")
 
 
 if __name__ == "__main__":

@@ -33,23 +33,38 @@ def clamp_point(point, map_size):
     return (x, y)
 
 
-def is_collision_free(p1, p2, obstacles=None, clearance=0.0):
+def is_collision_free(p1, p2, obstacles=None, clearance=0.0, allow_touches=False):
     if not obstacles:
         return True
     for obs in obstacles:
-        if line_intersects_rect(p1, p2, obs, clearance=clearance):
+        if line_intersects_rect(p1, p2, obs, clearance=clearance, allow_touches=allow_touches):
             return False
     return True
 
 
-def line_intersects_rect(p1, p2, rect, clearance=0.0):
-    x_min, y_min, x_max, y_max = rect
-    if clearance > 0:
-        x_min -= clearance
-        y_min -= clearance
-        x_max += clearance
-        y_max += clearance
-
+def line_intersects_rect(p1, p2, rect, clearance=0.0, allow_touches=False):
     line = LineString([p1, p2])
-    rect_shape = box(x_min, y_min, x_max, y_max)
-    return line.intersects(rect_shape)
+
+    def _hits_geom(geom):
+        if allow_touches:
+            return line.crosses(geom) or line.within(geom) or line.overlaps(geom) or geom.contains(line)
+        return line.intersects(geom)
+
+    # Obstáculo representado como retângulo (AABB)
+    if isinstance(rect, (tuple, list)) and len(rect) == 4:
+        x_min, y_min, x_max, y_max = rect
+        if clearance > 0:
+            x_min -= clearance
+            y_min -= clearance
+            x_max += clearance
+            y_max += clearance
+
+        rect_shape = box(x_min, y_min, x_max, y_max)
+        return _hits_geom(rect_shape)
+
+    # Obstáculo representado como geometria Shapely (Polygon/Buffered)
+    if hasattr(rect, "intersects"):
+        geom = rect.buffer(clearance, join_style=2) if clearance > 0 else rect
+        return _hits_geom(geom)
+
+    raise TypeError("Obstacle format not supported for collision check")
