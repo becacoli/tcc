@@ -1,6 +1,8 @@
 import argparse
 import os
 import sys
+import time
+import math
 
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 from shapely.geometry import Polygon
@@ -84,7 +86,110 @@ def build_parser():
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--plot-planner", action="store_true")
     parser.add_argument("--plot-block", action="store_true")
+    parser.add_argument("--online-replan", action="store_true", default=False)
+    parser.add_argument("--replan-period", type=float, default=1.0)
+    parser.add_argument("--max-replans", type=int, default=60)
+    parser.add_argument("--online-max-time", type=float, default=120.0)
     return parser
+
+
+def _run_online_replanning(sim, robot, left_motor, right_motor, args):
+    nav_start = time.time()
+    replans = 0
+    total_plan_time = 0.0
+
+    print("Connected to CoppeliaSim")
+    print("Planner+Control mode: ONLINE REPLANNING")
+    print(f"  algorithm: {args.algo}")
+    print(f"  obstacle model: {args.obstacle_model}")
+    print(f"  obstacle primitives: {args.obstacle_primitives}")
+    print(f"  replan period: {args.replan_period:.2f} s")
+
+    while replans < max(1, args.max_replans):
+        elapsed = time.time() - nav_start
+        if elapsed > args.online_max_time:
+            print("Control layer (wheel execution):")
+            print("  success: False")
+            print("  reason: online_timeout")
+            print(f"  execution time: {elapsed:.3f} s")
+            return
+
+        # 1) Sense: fresh world/map state from simulator
+        context = extract_planning_context(sim, args)
+        robot_pos = context.robot_position()
+        goal_pos = context.goal_position()
+        robot_goal_dist = math.hypot(goal_pos[0] - robot_pos[0], goal_pos[1] - robot_pos[1])
+
+        if robot_goal_dist <= args.goal_tolerance:
+            print("Control layer (wheel execution):")
+            print("  success: True")
+            print("  reason: already_at_goal")
+            print(f"  execution time: {elapsed:.3f} s")
+            print(f"  replans: {replans}")
+            return
+
+        # 2) Plan with updated context
+        path_planner, plan_metrics = plan_path_independent(context, args)
+        total_plan_time += plan_metrics["planning_time_s"]
+        replans += 1
+
+        if args.debug:
+            print(
+                f"[online] cycle={replans} dist_goal={robot_goal_dist:.3f}m "
+                f"plan_time={plan_metrics['planning_time_s']:.3f}s "
+                f"waypoints={plan_metrics.get('processed_waypoints', 0)}"
+            )
+
+        if not path_planner:
+            if args.debug:
+                print("[online] no path in this cycle; retrying...")
+            time.sleep(min(max(args.dt, 0.01), max(args.replan_period, 0.05)))
+            continue
+
+        # 3) Act for a short window, then replan again
+        waypoints_world = planner_path_to_world(path_planner, context)
+        control_obstacles_world = build_control_obstacles_world(context, args)
+
+        remaining_total = max(0.0, args.online_max_time - (time.time() - nav_start))
+        control_window = min(max(args.replan_period, 0.05), remaining_total)
+        if control_window <= 0.0:
+            break
+
+        control_result = follow_world_path(
+            sim,
+            robot,
+            left_motor,
+            right_motor,
+            waypoints_world,
+            args,
+            obstacles_world=control_obstacles_world,
+            max_exec_time_override=control_window,
+        )
+
+        if control_result.get("success", False):
+            print("Control layer (wheel execution):")
+            print("  success: True")
+            print(f"  reason: {control_result['reason']}")
+            print(f"  execution time: {time.time() - nav_start:.3f} s")
+            print(f"  replans: {replans}")
+            print(f"  total planning time: {total_plan_time:.3f} s")
+            if "final_error_m" in control_result:
+                print(f"  final goal error: {control_result['final_error_m']:.3f} m")
+            return
+
+        if control_result.get("reason") == "window_elapsed":
+            continue
+
+        # For blocked/stuck cases, keep looping and trying to replan until budget ends.
+        if args.debug:
+            print(f"[online] controller reported: {control_result.get('reason')}")
+
+    print("Control layer (wheel execution):")
+    print("  success: False")
+    print("  reason: max_replans_reached")
+    print(f"  execution time: {time.time() - nav_start:.3f} s")
+    print(f"  replans: {replans}")
+    print(f"  total planning time: {total_plan_time:.3f} s")
 
 
 def main():
@@ -97,6 +202,10 @@ def main():
     left_motor = sim.getObject(args.left_motor_path)
     right_motor = sim.getObject(args.right_motor_path)
 
+    if args.online_replan:
+        _run_online_replanning(sim, robot, left_motor, right_motor, args)
+        return
+
     # 1) PLANEJAMENTO ISOLADO
     context = extract_planning_context(sim, args)
     path_planner, plan_metrics = plan_path_independent(context, args)
@@ -105,6 +214,7 @@ def main():
     print("Planner layer (isolated):")
     print(f"  algorithm: {args.algo}")
     print(f"  obstacle model: {args.obstacle_model}")
+    print(f"  obstacle primitives: {args.obstacle_primitives}")
     print(f"  robot radius: {args.robot_radius:.3f}")
     print(f"  planning time: {plan_metrics['planning_time_s']:.4f} s")
     print(f"  iterations: {plan_metrics['iterations']}")

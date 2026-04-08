@@ -172,6 +172,7 @@ class CoppeliaSimContextExtractor:
                        map_size_pixels: Tuple[int, int] = (100, 100),
                        wall_inflate: float = 0.0,
                        cuboid_only: bool = True,
+                       obstacle_primitives: Optional[str] = None,
                        allow_start_in_obstacle: bool = False,
                        scenario_name: str = "scene") -> PlanningContext:
         """
@@ -182,6 +183,7 @@ class CoppeliaSimContextExtractor:
             map_size_pixels: Tamanho do mapa para planejamento
             wall_inflate: Inflação dos obstáculos (margem de segurança)
             cuboid_only: Se True, usa apenas obstáculos com primitive shape cuboid
+            obstacle_primitives: Filtro de primitivas: "cuboid", "cuboid_spheroid" ou "all"
             allow_start_in_obstacle: Se True, não falha quando start estiver em obstáculo
             scenario_name: Nome do cenário para metadata
         
@@ -206,12 +208,17 @@ class CoppeliaSimContextExtractor:
         
         world_bounds_obj = WorldBounds(*world_bounds)
         print(f"✓ World bounds: {world_bounds_obj}")
+
+        primitive_mode = obstacle_primitives
+        if primitive_mode is None:
+            primitive_mode = "cuboid" if cuboid_only else "all"
         
         # ===== 4. Extrai obstáculos (paredes) =====
         obstacles, obstacle_details = self._extract_obstacles(
             wall_inflate,
             world_bounds=world_bounds,
             cuboid_only=cuboid_only,
+            obstacle_primitives=primitive_mode,
         )
         print(f"✓ Extraídos {len(obstacles)} obstáculos")
         
@@ -225,6 +232,7 @@ class CoppeliaSimContextExtractor:
         builder.set_metadata("scenario", scenario_name)
         builder.set_metadata("extracted_from", "coppelia_sim")
         builder.set_metadata("cuboid_only", cuboid_only)
+        builder.set_metadata("obstacle_primitives", primitive_mode)
         builder.set_metadata("allow_start_in_obstacle", allow_start_in_obstacle)
         builder.set_metadata("obstacle_details", obstacle_details)
         
@@ -274,11 +282,21 @@ class CoppeliaSimContextExtractor:
         
         return (x_min, x_max, y_min, y_max)
     
-    def _is_cuboid_shape(self, handle) -> bool:
-        """Verifica via API se shape é primitive cuboid. Fallback: True quando indisponível."""
+    def _is_allowed_shape(self, handle, obstacle_primitives: str) -> bool:
+        """Verifica via API se shape atende ao filtro de primitivas."""
+        if obstacle_primitives == "all":
+            return True
+
         try:
             primitive_type = self.sim.getObjectInt32Param(handle, self.sim.shapeintparam_primitive_type)
-            return primitive_type == self.sim.primitiveshape_cuboid
+
+            allowed = {self.sim.primitiveshape_cuboid}
+            if obstacle_primitives == "cuboid_spheroid":
+                spheroid_type = getattr(self.sim, "primitiveshape_spheroid", None)
+                if spheroid_type is not None:
+                    allowed.add(spheroid_type)
+
+            return primitive_type in allowed
         except Exception:
             # Fallback para compatibilidade entre versões/API bindings
             return True
@@ -288,6 +306,7 @@ class CoppeliaSimContextExtractor:
         inflate_by: float = 0.0,
         world_bounds: Optional[Tuple[float, float, float, float]] = None,
         cuboid_only: bool = True,
+        obstacle_primitives: str = "cuboid",
     ) -> Tuple[List[Obstacle], List[dict]]:
         """
         Extrai lista de obstáculos (paredes) do simulador.
@@ -321,8 +340,8 @@ class CoppeliaSimContextExtractor:
             if not _wall_name_matches(alias, self.walls_prefix):
                 continue
 
-            # Requisito do orientador: usar apenas primitive cuboid
-            if cuboid_only and (not self._is_cuboid_shape(handle)):
+            # Filtro de primitivas (cuboid, cuboid+spheroid, all)
+            if cuboid_only and (not self._is_allowed_shape(handle, obstacle_primitives)):
                 continue
             
             try:
@@ -387,6 +406,7 @@ def create_context_from_coppelia(sim, robot_path: str = "/PioneerP3DX",
                                  map_size_pixels: Tuple[int, int] = (100, 100),
                                  wall_inflate: float = 0.0,
                                  cuboid_only: bool = True,
+                                 obstacle_primitives: Optional[str] = None,
                                  allow_start_in_obstacle: bool = False) -> PlanningContext:
     """
     Função auxiliar para extrair contexto do CoppeliaSim em uma única chamada.
@@ -399,6 +419,7 @@ def create_context_from_coppelia(sim, robot_path: str = "/PioneerP3DX",
         map_size_pixels: Tamanho do mapa de planejamento
         wall_inflate: Margem de segurança para obstáculos
         cuboid_only: Se True, mantém apenas obstáculos primitive cuboid
+        obstacle_primitives: Filtro de primitivas: "cuboid", "cuboid_spheroid" ou "all"
         allow_start_in_obstacle: Se True, permite start inicialmente em obstáculo
         
     Returns:
@@ -425,5 +446,6 @@ def create_context_from_coppelia(sim, robot_path: str = "/PioneerP3DX",
         map_size_pixels=map_size_pixels,
         wall_inflate=wall_inflate,
         cuboid_only=cuboid_only,
+        obstacle_primitives=obstacle_primitives,
         allow_start_in_obstacle=allow_start_in_obstacle,
     )

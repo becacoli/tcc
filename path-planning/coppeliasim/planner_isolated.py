@@ -53,6 +53,12 @@ def add_planner_arguments(parser):
     parser.add_argument("--obstacle-model", choices=["aabb", "polygon"], default="polygon")
     parser.add_argument("--polygon-source", choices=["bbox", "vertices"], default="bbox")
     parser.add_argument("--robot-radius", type=float, default=0.0)
+    parser.add_argument(
+        "--obstacle-primitives",
+        choices=["cuboid", "cuboid_spheroid", "all"],
+        default="cuboid",
+        help="Filtro de primitivas de obstáculos extraídas do CoppeliaSim",
+    )
 
 
 def extract_planning_context(sim, args):
@@ -63,6 +69,7 @@ def extract_planning_context(sim, args):
         goal_object=args.goal_object,
         map_size_pixels=(args.map_width, args.map_height),
         wall_inflate=args.wall_inflate,
+        obstacle_primitives=getattr(args, "obstacle_primitives", "cuboid"),
         allow_start_in_obstacle=args.allow_start_in_obstacle,
     )
     return context

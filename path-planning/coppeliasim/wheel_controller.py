@@ -92,9 +92,22 @@ def _nearest_obstacle_distance(point_xy, obstacles_world):
     return min(_distance_point_to_obstacle(point_xy, obs) for obs in obstacles_world)
 
 
-def follow_world_path(sim, robot, left_motor, right_motor, waypoints_world, args, obstacles_world=None):
+def follow_world_path(
+    sim,
+    robot,
+    left_motor,
+    right_motor,
+    waypoints_world,
+    args,
+    obstacles_world=None,
+    max_exec_time_override=None,
+):
     """Execute wheel control on already-planned world waypoints."""
     exec_start = time.time()
+    max_exec_time = args.max_exec_time
+    if max_exec_time_override is not None:
+        max_exec_time = max(0.0, float(max_exec_time_override))
+
     waypoint_idx = 0
     last_progress_time = time.time()
     best_dist_to_current = float("inf")
@@ -103,11 +116,12 @@ def follow_world_path(sim, robot, left_motor, right_motor, waypoints_world, args
     tracking_clearance = args.tracking_clearance if args.tracking_clearance is not None else args.control_clearance
 
     while waypoint_idx < len(waypoints_world):
-        if (time.time() - exec_start) > args.max_exec_time:
+        if (time.time() - exec_start) > max_exec_time:
             set_wheel_speeds(sim, left_motor, right_motor, 0.0, 0.0, args.wheel_radius, args.wheel_base)
+            reason = "timeout" if max_exec_time_override is None else "window_elapsed"
             return {
                 "success": False,
-                "reason": "timeout",
+                "reason": reason,
                 "waypoint_idx": waypoint_idx,
                 "skipped_waypoints": skipped_waypoints,
                 "execution_time_s": time.time() - exec_start,

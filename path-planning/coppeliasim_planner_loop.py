@@ -48,7 +48,8 @@ class RecurrentPlannerLoop:
                  step_size=0.5, goal_sample_rate=0.1, neighbor_radius=5.0,
                  world_bounds=None, map_size_pixels=(100, 100),
                  wall_inflate=0.0, robot_path="/PioneerP3DX",
-                 goal_object="/GoalConfiguration", cuboid_only=True):
+                 goal_object="/GoalConfiguration", cuboid_only=True,
+                 obstacle_primitives=None):
         """
         Args:
             sim: Simulador CoppeliaSim
@@ -72,6 +73,7 @@ class RecurrentPlannerLoop:
         self.robot_path = robot_path
         self.goal_object = goal_object
         self.cuboid_only = cuboid_only
+        self.obstacle_primitives = obstacle_primitives or ("cuboid" if cuboid_only else "all")
         
         # Métricas
         self.metrics = []
@@ -130,6 +132,7 @@ class RecurrentPlannerLoop:
             map_size_pixels=self.map_size_pixels,
             wall_inflate=self.wall_inflate,
             cuboid_only=self.cuboid_only,
+            obstacle_primitives=self.obstacle_primitives,
         )
         
         return context
@@ -347,6 +350,12 @@ def main():
                        help="Inflação dos obstáculos")
     parser.add_argument("--cuboid-only", action="store_true", default=True,
                        help="Usa apenas obstáculos primitive cuboid")
+    parser.add_argument(
+        "--obstacle-primitives",
+        choices=["cuboid", "cuboid_spheroid", "all"],
+        default="cuboid",
+        help="Filtro de primitivas de obstáculos extraídas do CoppeliaSim",
+    )
     parser.add_argument("--save-metrics", default="planning_metrics.json",
                        help="Arquivo para salvar métricas (JSON)")
     parser.add_argument("--delay", type=float, default=1.0,
@@ -379,6 +388,7 @@ def main():
         robot_path=args.robot_path,
         goal_object=args.goal_object,
         cuboid_only=args.cuboid_only,
+        obstacle_primitives=args.obstacle_primitives,
     )
     
     # Executa loop
