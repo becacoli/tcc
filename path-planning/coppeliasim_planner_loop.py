@@ -1,16 +1,3 @@
-"""
-Script de integração com CoppeliaSim: Loop Recorrente de Planejamento
-
-Demonstra o fluxo solicitado pelo orientador:
-1. Extrai dados do CoppeliaSim de forma recorrente
-2. Expõe claramente: pose do robô, pose do objetivo, obstáculos
-3. Permite avaliar/comparar algoritmos sem viés
-4. Isola o planejador de outras partes da pilha (controle, mapeamento)
-
-Uso típico:
-    python coppeliasim_planner_loop.py --host localhost --port 23000
-"""
-
 import argparse
 import json
 import time

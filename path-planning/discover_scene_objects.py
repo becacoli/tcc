@@ -1,15 +1,3 @@
-"""
-Descobre objetos disponíveis na cena CoppeliaSim
-
-Execute com CoppeliaSim rodando (scene.ttt carregada):
-  python discover_scene_objects.py
-
-Mostrará:
-  • Nome de cada objeto
-  • Tipo de objeto
-  • Posição (x, y, z)
-"""
-
 import sys
 sys.path.insert(0, ".")
 
@@ -19,6 +7,42 @@ except ImportError:
     print("Erro: RemoteAPI não encontrada")
     print("Copie coppeliasim_zmqremoteapi_client.py para este diretório")
     sys.exit(1)
+
+
+def get_all_scene_objects(sim):
+    """Return all scene object handles across common CoppeliaSim API versions."""
+    try:
+        return sim.getObjectsInTree(sim.handle_scene, sim.handle_all, 0)
+    except Exception:
+        pass
+
+    try:
+        return sim.getObjects(sim.handle_all, 0)
+    except Exception:
+        pass
+
+    objects = []
+    index = 0
+    while True:
+        try:
+            handle = sim.getObjects(index, sim.handle_all)
+        except Exception:
+            break
+        if handle == -1:
+            break
+        objects.append(handle)
+        index += 1
+    return objects
+
+
+def get_object_label(sim, obj_handle):
+    try:
+        return sim.getObjectAlias(obj_handle, 1)
+    except Exception:
+        try:
+            return sim.getObjectAlias(obj_handle)
+        except Exception:
+            return sim.getObjectName(obj_handle)
 
 
 def main():
@@ -44,14 +68,14 @@ def main():
     
     try:
         # Listar todos os objetos
-        all_objects = sim.getObjects(sim.handle_all, None)
+        all_objects = get_all_scene_objects(sim)
         
         print(f"\nTotal: {len(all_objects)} objetos\n")
         
         for obj_handle in all_objects:
             try:
                 # Nome
-                name = sim.getObjectName(obj_handle)
+                name = get_object_label(sim, obj_handle)
                 
                 # Tipo
                 obj_type = sim.getObjectType(obj_handle)

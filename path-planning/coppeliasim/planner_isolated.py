@@ -10,6 +10,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from algorithms.informed_rrt_star import InformedRRTStar
+from algorithms.est import EST, HybridEST
 from algorithms.rrt import RRT
 from algorithms.rrt_connect import RRTConnect
 from algorithms.rrt_star import RRTStar
@@ -27,6 +28,8 @@ ALGORITHMS = {
     "rrt_star": RRTStar,
     "rrt_connect": RRTConnect,
     "informed_rrt_star": InformedRRTStar,
+    "est": EST,
+    "est_hybrid": HybridEST,
     "rrt_star_smart": RRTStarSmart,
 }
 
@@ -34,12 +37,16 @@ ALGORITHMS = {
 def add_planner_arguments(parser):
     parser.add_argument(
         "--algo",
-        choices=["rrt", "rrt_star", "rrt_connect", "informed_rrt_star", "rrt_star_smart"],
+        choices=["rrt", "rrt_star", "rrt_connect", "informed_rrt_star", "rrt_star_smart", "est", "est_hybrid"],
         default="rrt",
     )
     parser.add_argument("--max-iter", type=int, default=1000)
     parser.add_argument("--step-size", type=float, default=0.5)
     parser.add_argument("--goal-sample-rate", type=float, default=0.1)
+    parser.add_argument("--density-radius", type=float, default=8.0)
+    parser.add_argument("--local-sample-radius", type=float, default=None)
+    parser.add_argument("--global-sample-rate", type=float, default=0.15)
+    parser.add_argument("--density-candidates", type=int, default=40)
     parser.add_argument("--x-direction", choices=["any", "right_only", "left_only"], default="any")
     parser.add_argument("--neighbor-radius", type=float, default=5.0)
     parser.add_argument("--beacon-sample-rate", type=float, default=0.35)
@@ -227,6 +234,13 @@ def plan_path_independent(context, args):
 
     if algo_name in {"rrt_star", "informed_rrt_star", "rrt_star_smart"}:
         kwargs["neighbor_radius"] = args.neighbor_radius
+
+    if algo_name in {"est", "est_hybrid"}:
+        kwargs["density_radius"] = args.density_radius
+        kwargs["local_sample_radius"] = args.local_sample_radius
+        kwargs["density_candidates"] = args.density_candidates
+        if algo_name == "est_hybrid":
+            kwargs["global_sample_rate"] = args.global_sample_rate
 
     if algo_name == "rrt_star_smart":
         kwargs["beacon_sample_rate"] = args.beacon_sample_rate

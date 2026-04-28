@@ -1,5 +1,5 @@
 import math
-from shapely.geometry import LineString, box
+from shapely.geometry import LineString, Point, box
 
 
 def distance(p1, p2):
@@ -68,3 +68,52 @@ def line_intersects_rect(p1, p2, rect, clearance=0.0, allow_touches=False):
         return _hits_geom(geom)
 
     raise TypeError("Obstacle format not supported for collision check")
+
+def _obstacle_to_geometry(obstacle, clearance=0.0):
+    """Converte AABB ou geometria Shapely em uma geometria com clearance opcional."""
+    if isinstance(obstacle, (tuple, list)) and len(obstacle) == 4:
+        x_min, y_min, x_max, y_max = obstacle
+        geom = box(x_min, y_min, x_max, y_max)
+    elif hasattr(obstacle, "intersects"):
+        geom = obstacle
+    else:
+        raise TypeError("Obstacle format not supported for collision check")
+
+    if clearance > 0:
+        return geom.buffer(clearance, join_style=2)
+    return geom
+
+
+def is_point_collision_free(point, obstacles=None, clearance=0.0, allow_touches=False):
+    """Verifica se uma configuração pontual está fora dos obstáculos.
+
+    Essa função deixa explícita a hipótese usada nas provas de planejamento:
+    uma configuração q pertence a X_free quando não intersecta nenhum obstáculo.
+    """
+    if not obstacles:
+        return True
+
+    p = Point(point[0], point[1])
+    for obs in obstacles:
+        geom = _obstacle_to_geometry(obs, clearance=clearance)
+        if allow_touches:
+            if geom.contains(p):
+                return False
+        else:
+            if geom.intersects(p) or geom.contains(p):
+                return False
+    return True
+
+
+def minimum_distance_to_obstacles(point, obstacles=None):
+    """Retorna a menor distância de um ponto aos obstáculos."""
+    if not obstacles:
+        return float("inf")
+
+    p = Point(point[0], point[1])
+    distances = []
+    for obs in obstacles:
+        geom = _obstacle_to_geometry(obs, clearance=0.0)
+        distances.append(p.distance(geom))
+    return min(distances) if distances else float("inf")
+

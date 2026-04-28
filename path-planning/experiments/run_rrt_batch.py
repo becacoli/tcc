@@ -1,4 +1,12 @@
 import argparse
+import os
+import sys
+
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
+
 import csv
 import json
 import os
@@ -9,6 +17,7 @@ import time
 from algorithms.rrt import RRT
 from algorithms.rrt_connect import RRTConnect
 from algorithms.informed_rrt_star import InformedRRTStar
+from algorithms.est import EST, HybridEST
 from algorithms.rrt_merged import RRTMerge
 from algorithms.rrt_star import RRTStar
 from algorithms.rrt_star_smart import RRTStarSmart
@@ -22,6 +31,8 @@ ALGORITHMS = {
     "rrt_connect": RRTConnect,
     "rrt_merged": RRTMerge,
     "informed_rrt_star": InformedRRTStar,
+    "est": EST,
+    "est_hybrid": HybridEST,
     "rrt_star_smart": RRTStarSmart,
 }
 
@@ -97,6 +108,19 @@ SCENARIOS = {
         "map_size": (100, 100),
         "obstacles": [],
     },
+    "passagem_estreita": {
+        "start": (10, 50),
+        "goal": (90, 50),
+        "map_size": (100, 100),
+        "obstacles": [
+            (0, 0, 100, 35),
+            (0, 65, 100, 100),
+            (35, 35, 45, 48),
+            (35, 52, 45, 65),
+            (60, 35, 70, 48),
+            (60, 52, 70, 65),
+        ],
+    },
 }
 
 
@@ -110,6 +134,12 @@ def _build_kwargs(name, args):
         base["x_direction"] = args.x_direction
     if name in {"rrt_star", "informed_rrt_star", "rrt_star_smart"}:
         base["neighbor_radius"] = args.neighbor_radius
+    if name in {"est", "est_hybrid"}:
+        base["density_radius"] = args.density_radius
+        base["local_sample_radius"] = args.local_sample_radius
+        base["density_candidates"] = args.density_candidates
+        if name == "est_hybrid":
+            base["global_sample_rate"] = args.global_sample_rate
     if name == "rrt_merged":
         base["connect_threshold"] = args.connect_threshold
     if name == "rrt_star_smart":
@@ -153,6 +183,10 @@ def main():
     parser.add_argument("--max-iter", type=int, default=500)
     parser.add_argument("--step-size", type=float, default=5)
     parser.add_argument("--goal-sample-rate", type=float, default=0.05)
+    parser.add_argument("--density-radius", type=float, default=10.0)
+    parser.add_argument("--local-sample-radius", type=float, default=None)
+    parser.add_argument("--global-sample-rate", type=float, default=0.15)
+    parser.add_argument("--density-candidates", type=int, default=40)
     parser.add_argument("--x-direction", choices=["any", "right_only", "left_only"], default="any")
     parser.add_argument("--neighbor-radius", type=float, default=15)
     parser.add_argument("--connect-threshold", type=float, default=10)
@@ -294,6 +328,7 @@ def main():
         "seed",
         "algorithm",
         "scenario",
+        "x_direction",
         "success",
         "planning_time",
         "num_nodes",
