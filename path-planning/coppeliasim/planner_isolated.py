@@ -56,6 +56,9 @@ def add_planner_arguments(parser):
     parser.add_argument("--wall-inflate", type=float, default=0.0)
     parser.add_argument("--allow-start-in-obstacle", action="store_true", default=False)
     parser.add_argument("--plan-attempts", type=int, default=5)
+    parser.add_argument("--min-path-clearance", type=float, default=0.0,
+                        help="Folga minima (planner units) ao longo do caminho. "
+                             "Caminhos com folga menor sao rejeitados e o planner tenta novamente.")
     parser.add_argument("--waypoint-spacing", type=float, default=0.12)
     parser.add_argument("--obstacle-model", choices=["aabb", "polygon"], default="polygon")
     parser.add_argument("--polygon-source", choices=["bbox", "vertices"], default="bbox")
@@ -176,6 +179,28 @@ def _meters_to_planner_units(context, spacing_m):
     return spacing_m * scale
 
 
+def _path_min_clearance(path, obstacles):
+    """Retorna a menor distância de qualquer waypoint do caminho a qualquer obstáculo."""
+    if not path or not obstacles:
+        return float("inf")
+    from shapely.geometry import Point as ShapelyPoint
+    min_dist = float("inf")
+    for point in path:
+        pt = ShapelyPoint(point[0], point[1])
+        for obs in obstacles:
+            if hasattr(obs, "distance"):
+                dist = obs.exterior.distance(pt) if not obs.contains(pt) else 0.0
+            elif isinstance(obs, tuple) and len(obs) == 4:
+                x_min, y_min, x_max, y_max = obs
+                dx = max(x_min - point[0], 0.0, point[0] - x_max)
+                dy = max(y_min - point[1], 0.0, point[1] - y_max)
+                dist = math.hypot(dx, dy)
+            else:
+                continue
+            min_dist = min(min_dist, dist)
+    return min_dist
+
+
 def plan_path_independent(context, args):
     """Run planner independently of control/state-estimation/mapping stack."""
     start = world_to_planner_coords(*context.robot_position(), context)
@@ -249,12 +274,15 @@ def plan_path_independent(context, args):
     planner = None
     path_planner = None
     attempts = max(1, int(getattr(args, "plan_attempts", 1)))
+    min_clearance = max(0.0, float(getattr(args, "min_path_clearance", 0.0)))
     raw_waypoints = 0
     processed_waypoints = 0
     for _ in range(attempts):
         planner = algo_cls(start, goal, map_size, **kwargs)
         candidate = planner.planning()
         if candidate and path_is_collision_free(candidate, obstacles):
+            if min_clearance > 0.0 and _path_min_clearance(candidate, obstacles) < min_clearance:
+                continue  # caminho passa perto demais dos obstáculos, tenta de novo
             # Alguns planejadores bidirecionais podem retornar goal->start.
             # Normaliza para start->goal para o controlador seguir corretamente.
             if _path_starts_near_goal(candidate, start, goal):
