@@ -55,24 +55,33 @@ DISPLAY_ORDER = [
 # ---------------------------------------------------------------------------
 
 def load_csv(paths: list[str]) -> dict[str, list[dict]]:
-    """Carrega um ou mais CSVs e agrupa por preset."""
+    """
+    Carrega um ou mais CSVs e agrupa por preset.
+    Se houver coluna 'scene', agrupa por 'scene/preset' para separar cenas.
+    Compatível com CSVs antigos (sem coluna 'scene').
+    """
     runs_by_preset: dict[str, list[dict]] = {}
     for path in paths:
         with open(path, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
+                scene = row.get("scene", "").strip()
                 preset = row["preset"]
+                key = f"{scene}/{preset}" if scene else preset
                 run = {
-                    "success":            row["success"].lower() in ("true", "1"),
-                    "reason":             row["reason"],
-                    "planning_time_s":    _float(row["planning_time_s"]),
-                    "execution_time_s":   _float(row["execution_time_s"]),
-                    "final_error_m":      _float(row["final_error_m"]),
-                    "iterations":         _float(row["iterations"]),
-                    "processed_waypoints":_float(row["processed_waypoints"]),
-                    "skipped_waypoints":  _float(row["skipped_waypoints"]),
+                    "scene":               scene,
+                    "success":             row["success"].lower() in ("true", "1"),
+                    "reason":              row["reason"],
+                    "planning_time_s":     _float(row["planning_time_s"]),
+                    "execution_time_s":    _float(row["execution_time_s"]),
+                    "final_error_m":       _float(row["final_error_m"]),
+                    "iterations":          _float(row["iterations"]),
+                    "processed_waypoints": _float(row["processed_waypoints"]),
+                    "skipped_waypoints":   _float(row["skipped_waypoints"]),
+                    # campo novo — nan se CSV antigo não tiver a coluna
+                    "min_clearance_m":     _float(row.get("min_clearance_m", "nan")),
                 }
-                runs_by_preset.setdefault(preset, []).append(run)
+                runs_by_preset.setdefault(key, []).append(run)
     return runs_by_preset
 
 
@@ -112,7 +121,8 @@ def compute_stats(runs: list[dict]) -> dict:
         stats[f"{key}_mean"] = m
         stats[f"{key}_std"] = s
 
-    for key in ("execution_time_s", "final_error_m", "skipped_waypoints"):
+    for key in ("execution_time_s", "final_error_m", "skipped_waypoints",
+                "min_clearance_m"):
         m, s = _mean_std([r[key] for r in ok_runs])
         stats[f"{key}_mean"] = m
         stats[f"{key}_std"] = s
@@ -129,12 +139,38 @@ def stats_all(runs_by_preset: dict) -> dict[str, dict]:
 # ---------------------------------------------------------------------------
 
 def sorted_presets(all_stats: dict) -> list[str]:
-    ordered = [p for p in DISPLAY_ORDER if p in all_stats]
-    # Adiciona presets desconhecidos no fim
-    for p in all_stats:
-        if p not in ordered:
-            ordered.append(p)
-    return ordered
+    """
+    Ordena as chaves de all_stats.
+    Chaves podem ser 'preset' (sem cena) ou 'cena/preset'.
+    Agrupa por cena e dentro de cada cena segue DISPLAY_ORDER.
+    """
+    def _sort_key(key):
+        parts = key.split("/", 1)
+        scene = parts[0] if len(parts) == 2 else ""
+        preset = parts[-1]
+        order = DISPLAY_ORDER.index(preset) if preset in DISPLAY_ORDER else len(DISPLAY_ORDER)
+        return (scene, order)
+
+    return sorted(all_stats.keys(), key=_sort_key)
+
+
+# ---------------------------------------------------------------------------
+# Rótulos de exibição
+# ---------------------------------------------------------------------------
+
+def _label(key: str) -> str:
+    """Converte chave 'cena/preset' ou 'preset' em rótulo legível para gráficos."""
+    scene, sep, preset = key.partition("/")
+    if sep:  # tem cena
+        base = PRESET_LABELS.get(preset, preset)
+        return f"{scene}\n{base}"
+    # sem cena — key inteira é o preset
+    return PRESET_LABELS.get(key, key)
+
+
+def _preset_name(key: str) -> str:
+    """Extrai o nome do preset de 'cena/preset' ou 'preset'."""
+    return key.split("/", 1)[-1]
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +180,7 @@ def sorted_presets(all_stats: dict) -> list[str]:
 def _bar_ax(ax, presets, values, errors, ylabel, title, colors, ylim_bottom=0):
     import numpy as np
     x = np.arange(len(presets))
-    labels = [PRESET_LABELS.get(p, p) for p in presets]
+    labels = [_label(p) for p in presets]
     bars = ax.bar(x, values, color=colors, width=0.55, zorder=3,
                   yerr=[e if not math.isnan(e) else 0 for e in errors],
                   capsize=4, error_kw={"elinewidth": 1.2, "ecolor": "#444"})
@@ -183,14 +219,21 @@ def generate_plots(
 
     os.makedirs(output_dir, exist_ok=True)
     presets = sorted_presets(all_stats)
-    colors = [PRESET_COLORS.get(p, "#888") for p in presets]
+    colors = [PRESET_COLORS.get(_preset_name(p), "#888") for p in presets]
     saved = []
+
+    # Título dinâmico baseado nas cenas presentes nos dados
+    scenes_present = sorted({k.split("/")[0] for k in presets if "/" in k} or {""})
+    if scenes_present == [""]:
+        fig_title = "Comparação CoppeliaSim"
+    else:
+        fig_title = "Comparação CoppeliaSim — " + ", ".join(s.upper() for s in scenes_present if s)
 
     # ------------------------------------------------------------------
     # Figura 1: Visão geral (2×2)
     # ------------------------------------------------------------------
     fig, axes = plt.subplots(2, 2, figsize=(13, 9))
-    fig.suptitle("Comparação CoppeliaSim — Cena 1", fontsize=13, fontweight="bold", y=0.98)
+    fig.suptitle(fig_title, fontsize=13, fontweight="bold", y=0.98)
 
     # 1a) Tempo de planejamento
     _bar_ax(
@@ -207,7 +250,7 @@ def generate_plots(
     n_labels = [f"n={all_stats[p]['n']}" for p in presets]
     bars = axes[0, 1].bar(x, success_rates, color=colors, width=0.55, zorder=3)
     axes[0, 1].set_xticks(x)
-    axes[0, 1].set_xticklabels([PRESET_LABELS.get(p, p) for p in presets], fontsize=8.5)
+    axes[0, 1].set_xticklabels([_label(p) for p in presets], fontsize=8.5)
     axes[0, 1].set_ylabel("Taxa (%)", fontsize=9)
     axes[0, 1].set_title("Taxa de Sucesso", fontsize=10, fontweight="bold")
     axes[0, 1].set_ylim(0, 115)
@@ -255,7 +298,7 @@ def generate_plots(
                    capsize=4, error_kw={"elinewidth": 1.2, "ecolor": "#444"})
     ax2.set_yscale("log")
     ax2.set_xticks(x)
-    ax2.set_xticklabels([PRESET_LABELS.get(p, p) for p in presets], fontsize=9)
+    ax2.set_xticklabels([_label(p) for p in presets], fontsize=9)
     ax2.set_ylabel("Tempo (s) — escala log", fontsize=10)
     ax2.set_title("Tempo de Planejamento (escala logarítmica)", fontsize=11, fontweight="bold")
     ax2.grid(axis="y", which="both", alpha=0.3, zorder=0)
@@ -299,7 +342,7 @@ def generate_plots(
                 ax.plot([xi - 0.25, xi + 0.25], [mean, mean],
                         color=color, linewidth=2.0, zorder=5)
         ax.set_xticks(range(len(presets)))
-        ax.set_xticklabels([PRESET_LABELS.get(p, p) for p in presets], fontsize=8.5)
+        ax.set_xticklabels([_label(p) for p in presets], fontsize=8.5)
         ax.set_ylabel(ylabel, fontsize=9)
         ax.set_title(title, fontsize=10, fontweight="bold")
         ax.grid(axis="y", alpha=0.3, zorder=0)
@@ -322,6 +365,44 @@ def generate_plots(
     saved.append(path3)
     print(f"✓ {path3}")
 
+    # ------------------------------------------------------------------
+    # Figura 4: Clearance mínima do caminho (m)
+    # ------------------------------------------------------------------
+    # Só gera se houver dados de clearance (campo adicionado depois da v1)
+    clearance_means = [all_stats[p]["min_clearance_m_mean"] for p in presets]
+    if any(not math.isnan(v) for v in clearance_means):
+        fig4, ax4 = plt.subplots(figsize=(9, 5))
+        clearance_stds = [all_stats[p]["min_clearance_m_std"] for p in presets]
+        x = np.arange(len(presets))
+        bars4 = ax4.bar(
+            x, clearance_means, color=colors, width=0.55, zorder=3,
+            yerr=[s if not math.isnan(s) else 0 for s in clearance_stds],
+            capsize=4, error_kw={"elinewidth": 1.2, "ecolor": "#444"},
+        )
+        ax4.set_xticks(x)
+        ax4.set_xticklabels([_label(p) for p in presets], fontsize=9)
+        ax4.set_ylabel("Clearance mínima (m)", fontsize=10)
+        ax4.set_title(
+            "Clearance Mínima do Caminho Planejado\n"
+            "(distância ao obstáculo mais próximo — maior é mais seguro)",
+            fontsize=11, fontweight="bold",
+        )
+        ax4.grid(axis="y", alpha=0.3, zorder=0)
+        ax4.spines[["top", "right"]].set_visible(False)
+        for bar, val in zip(bars4, clearance_means):
+            if not math.isnan(val):
+                ax4.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    bar.get_height() + 0.002,
+                    f"{val:.3f}m",
+                    ha="center", va="bottom", fontsize=8,
+                )
+        plt.tight_layout()
+        path4 = os.path.join(output_dir, "coppelia_clearance.png")
+        fig4.savefig(path4, dpi=180, bbox_inches="tight")
+        saved.append(path4)
+        print(f"✓ {path4}")
+
     if show:
         plt.show()
     else:
@@ -342,24 +423,40 @@ def print_latex_table(all_stats: dict, presets: list[str]):
             return f"{mean:.2f}"
         return f"{mean:.2f} \\pm {std:.2f}"
 
+    # Verifica se há dados de clearance para incluir coluna extra
+    has_clearance = any(
+        not math.isnan(all_stats[p].get("min_clearance_m_mean", float("nan")))
+        for p in presets
+    )
+    col_spec = "lrrrrr" if has_clearance else "lrrrr"
+    header_extra = r" & $c_\text{min}$ (m)" if has_clearance else ""
+
     print()
     print(r"% --- Tabela gerada por plot_coppelia_results.py ---")
     print(r"\begin{table}[ht]")
     print(r"\centering")
-    print(r"\caption{Comparação de desempenho no CoppeliaSim --- Cena 1}")
+    print(r"\caption{Comparação de desempenho no CoppeliaSim}")
     print(r"\label{tab:coppelia_results}")
-    print(r"\begin{tabular}{lrrrr}")
+    print(f"\\begin{{tabular}}{{{col_spec}}}")
     print(r"\toprule")
-    print(r"Preset & Sucesso & $t_\text{plan}$ (s) & $t_\text{exec}$ (s) & Erro final (m) \\")
+    print(
+        r"Algoritmo & Sucesso & $t_\text{plan}$ (s) & $t_\text{exec}$ (s) "
+        + r"& Erro final (m)" + header_extra + r" \\"
+    )
     print(r"\midrule")
     for p in presets:
         s = all_stats[p]
-        label = PRESET_LABELS.get(p, p).replace("\n", " ")
+        label = _label(p).replace("\n", " ")
         succ  = f"{s['n_success']}/{s['n']} ({s['success_rate']*100:.0f}\\%)"
         tp    = _fmt(s["planning_time_s_mean"], s["planning_time_s_std"])
         te    = _fmt(s["execution_time_s_mean"], s["execution_time_s_std"])
         fe    = _fmt(s["final_error_m_mean"],    s["final_error_m_std"])
-        print(f"  {label:<30} & {succ:<14} & ${tp}$ & ${te}$ & ${fe}$ \\\\")
+        clearance_col = ""
+        if has_clearance:
+            cl = _fmt(s.get("min_clearance_m_mean", float("nan")),
+                      s.get("min_clearance_m_std",  float("nan")))
+            clearance_col = f" & ${cl}$"
+        print(f"  {label:<30} & {succ:<14} & ${tp}$ & ${te}$ & ${fe}${clearance_col} \\\\")
     print(r"\bottomrule")
     print(r"\end{tabular}")
     print(r"\end{table}")
@@ -371,15 +468,16 @@ def print_latex_table(all_stats: dict, presets: list[str]):
 # ---------------------------------------------------------------------------
 
 def print_text_table(all_stats: dict, presets: list[str]):
-    sep = "=" * 105
+    sep = "=" * 118
     print(f"\n{sep}")
     print("ESTATÍSTICAS — CoppeliaSim")
     print(sep)
     print(
         f"{'Preset':<28} {'n':<5} {'Sucesso':<10} "
-        f"{'t_plan(s)':<16} {'t_exec(s)':<16} {'err(m)':<14} {'waypts':<8} {'skip':<6}"
+        f"{'t_plan(s)':<16} {'t_exec(s)':<16} {'err(m)':<14} "
+        f"{'clearance(m)':<14} {'waypts':<8} {'skip':<6}"
     )
-    print("-" * 105)
+    print("-" * 118)
 
     def _f(m, s):
         if math.isnan(m):
@@ -396,6 +494,7 @@ def print_text_table(all_stats: dict, presets: list[str]):
             f"{_f(s['planning_time_s_mean'],  s['planning_time_s_std']):<16} "
             f"{_f(s['execution_time_s_mean'], s['execution_time_s_std']):<16} "
             f"{_f(s['final_error_m_mean'],    s['final_error_m_std']):<14} "
+            f"{_f(s.get('min_clearance_m_mean', float('nan')), s.get('min_clearance_m_std', float('nan'))):<14} "
             f"{s['processed_waypoints_mean']:<8.0f} "
             f"{_f(s['skipped_waypoints_mean'], float('nan'))}"
         )

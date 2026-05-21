@@ -301,6 +301,14 @@ def plan_path_independent(context, args):
 
     planning_time = time.time() - t0
 
+    # Clearance mínima do caminho (distância ao obstáculo mais próximo, em metros)
+    path_min_clearance_m = float("nan")
+    if path_planner and obstacles:
+        clearance_planner = _path_min_clearance(path_planner, obstacles)
+        if not math.isinf(clearance_planner):
+            scale = _meters_to_planner_units(context, 1.0)  # pixels por metro
+            path_min_clearance_m = clearance_planner / scale if scale > 0 else float("nan")
+
     iterations = getattr(planner, "iterations", getattr(planner, "samples_taken", 0))
     metrics = {
         "planning_time_s": planning_time,
@@ -309,6 +317,7 @@ def plan_path_independent(context, args):
         "plan_attempts": attempts,
         "raw_waypoints": raw_waypoints,
         "processed_waypoints": processed_waypoints,
+        "path_min_clearance_m": path_min_clearance_m,
         "start": start,
         "goal": goal,
         "map_size": map_size,
