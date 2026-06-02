@@ -9,17 +9,15 @@ def add_controller_arguments(parser):
     parser.add_argument("--wheel-radius", type=float, default=0.0975)
     parser.add_argument("--wheel-base", type=float, default=0.381)
     parser.add_argument("--linear-speed", type=float, default=0.25)
-    parser.add_argument("--angular-gain", type=float, default=2.0)
+    parser.add_argument("--angular-gain", type=float, default=3.0)
     parser.add_argument("--max-ang-speed", type=float, default=2.0)
-    parser.add_argument("--heading-stop-threshold", type=float, default=1.2)
-    parser.add_argument("--heading-deadband", type=float, default=0.05)
-    parser.add_argument("--spin-timeout", type=float, default=2.0)
+    parser.add_argument("--heading-stop-threshold", type=float, default=0.7)
     parser.add_argument("--waypoint-tolerance", type=float, default=0.20)
     parser.add_argument("--goal-tolerance", type=float, default=0.15)
     parser.add_argument("--dt", type=float, default=0.05)
     parser.add_argument("--max-exec-time", type=float, default=120.0)
-    parser.add_argument("--lookahead-waypoints", type=int, default=6)
-    parser.add_argument("--stuck-timeout", type=float, default=2.0)
+    parser.add_argument("--lookahead-waypoints", type=int, default=3)
+    parser.add_argument("--stuck-timeout", type=float, default=4.0)
     parser.add_argument("--stuck-progress-eps", type=float, default=0.02)
     parser.add_argument("--control-collision-check", action="store_true", default=True)
     parser.add_argument("--control-clearance", type=float, default=0.03)
@@ -94,38 +92,22 @@ def _nearest_obstacle_distance(point_xy, obstacles_world):
     return min(_distance_point_to_obstacle(point_xy, obs) for obs in obstacles_world)
 
 
-def follow_world_path(
-    sim,
-    robot,
-    left_motor,
-    right_motor,
-    waypoints_world,
-    args,
-    obstacles_world=None,
-    max_exec_time_override=None,
-):
+def follow_world_path(sim, robot, left_motor, right_motor, waypoints_world, args, obstacles_world=None):
     """Execute wheel control on already-planned world waypoints."""
     exec_start = time.time()
-    max_exec_time = args.max_exec_time
-    if max_exec_time_override is not None:
-        max_exec_time = max(0.0, float(max_exec_time_override))
-
     waypoint_idx = 0
     last_progress_time = time.time()
     best_dist_to_current = float("inf")
     skipped_waypoints = 0
     zero_clearance_uses = 0
     tracking_clearance = args.tracking_clearance if args.tracking_clearance is not None else args.control_clearance
-    prev_heading_error = None
-    large_heading_since = None
 
     while waypoint_idx < len(waypoints_world):
-        if (time.time() - exec_start) > max_exec_time:
+        if (time.time() - exec_start) > args.max_exec_time:
             set_wheel_speeds(sim, left_motor, right_motor, 0.0, 0.0, args.wheel_radius, args.wheel_base)
-            reason = "timeout" if max_exec_time_override is None else "window_elapsed"
             return {
                 "success": False,
-                "reason": reason,
+                "reason": "timeout",
                 "waypoint_idx": waypoint_idx,
                 "skipped_waypoints": skipped_waypoints,
                 "execution_time_s": time.time() - exec_start,
@@ -151,8 +133,7 @@ def follow_world_path(
             nearest_obs_dist = _nearest_obstacle_distance(pos_xy, obstacles_world)
 
             # Em corredor apertado, evita "cortar quina": mira no waypoint corrente.
-            # Usa tracking_clearance direto (sem fator 1.5) para não colapsar cedo demais.
-            if nearest_obs_dist < max(0.0, tracking_clearance):
+            if nearest_obs_dist < max(0.0, 1.5 * tracking_clearance):
                 lookahead_idx = waypoint_idx
 
             target_idx = _choose_safe_target_index(
@@ -226,8 +207,6 @@ def follow_world_path(
             waypoint_idx += 1
             best_dist_to_current = float("inf")
             last_progress_time = time.time()
-            prev_heading_error = None
-            large_heading_since = None
             continue
 
         # Se ficar muito tempo sem progresso, pula waypoint intermediario
@@ -237,8 +216,6 @@ def follow_world_path(
                 skipped_waypoints += 1
                 best_dist_to_current = float("inf")
                 last_progress_time = time.time()
-                prev_heading_error = None
-                large_heading_since = None
                 if getattr(args, "debug", False):
                     print(f"[control] stuck recovery: skipping to waypoint {waypoint_idx}")
                 continue
@@ -256,36 +233,7 @@ def follow_world_path(
         target_heading = math.atan2(dy, dx)
         heading_error = normalize_angle(target_heading - ori[2])
 
-        # Deadband: pequenos erros de alinhamento não geram correção angular
-        if abs(heading_error) < getattr(args, "heading_deadband", 0.05):
-            heading_error = 0.0
-
-        # Amortece ganho quando detecta overshoot (mudança de sinal no erro)
-        effective_gain = args.angular_gain
-        if prev_heading_error is not None and prev_heading_error * heading_error < 0:
-            effective_gain *= 0.5
-        prev_heading_error = heading_error
-
-        # Pula waypoint se o heading grande persistir além do spin_timeout
-        spin_timeout = getattr(args, "spin_timeout", 2.0)
-        if abs(heading_error) > args.heading_stop_threshold:
-            if large_heading_since is None:
-                large_heading_since = time.time()
-            elif (time.time() - large_heading_since) > spin_timeout:
-                if waypoint_idx < len(waypoints_world) - 1:
-                    waypoint_idx += 1
-                    skipped_waypoints += 1
-                    best_dist_to_current = float("inf")
-                    last_progress_time = time.time()
-                    prev_heading_error = None
-                    large_heading_since = None
-                    if getattr(args, "debug", False):
-                        print(f"[control] spin timeout: skipping to waypoint {waypoint_idx}")
-                    continue
-        else:
-            large_heading_since = None
-
-        omega = clamp(effective_gain * heading_error, -args.max_ang_speed, args.max_ang_speed)
+        omega = clamp(args.angular_gain * heading_error, -args.max_ang_speed, args.max_ang_speed)
         v = args.linear_speed * max(0.0, 1.0 - abs(heading_error) / math.pi)
 
         # Reduz velocidade ao aproximar de obstaculos para evitar raspar parede.
