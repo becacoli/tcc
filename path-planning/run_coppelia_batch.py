@@ -24,7 +24,8 @@ for _d in [SCRIPT_DIR, COPPELIASIM_DIR]:
 
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 
-from run_planner_command import PRESETS
+from run_planner_command import PRESETS as PRESETS_DEFAULT
+from run_planner_command_fair import PRESETS as PRESETS_FAIR
 from rrt_navigation import build_parser, build_control_obstacles_world
 from planner_isolated import (
     extract_planning_context,
@@ -108,8 +109,8 @@ def reset_and_verify(
 # Conversão preset → Namespace
 # ---------------------------------------------------------------------------
 
-def preset_to_args(preset_name: str) -> argparse.Namespace:
-    cli_args = PRESETS[preset_name]
+def preset_to_args(preset_name: str, presets: dict) -> argparse.Namespace:
+    cli_args = presets[preset_name]
     parser = build_parser()
     args = parser.parse_args(cli_args)
     args.plot_planner = False
@@ -285,8 +286,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
+        "--fair", action="store_true",
+        help="Usa presets equalizados (run_planner_command_fair.py) em vez dos padrão.",
+    )
+    parser.add_argument(
         "--presets", nargs="+", metavar="PRESET",
-        help=f"Presets a executar (use 'all' para todos). Disponíveis: {', '.join(PRESETS.keys())}",
+        help="Presets a executar (use 'all' para todos).",
     )
     parser.add_argument("--runs", type=int, default=5, help="Número de rodadas por preset (padrão: 5)")
     parser.add_argument("--output", default="results_coppelia.csv", help="Arquivo CSV de saída")
@@ -311,8 +316,12 @@ def main():
     parser.add_argument("--list", action="store_true", help="Lista os presets disponíveis e sai")
     args = parser.parse_args()
 
+    # Seleciona o dicionário de presets
+    PRESETS = PRESETS_FAIR if args.fair else PRESETS_DEFAULT
+
     if args.list:
-        print("Presets disponíveis:")
+        label = "equalizados" if args.fair else "padrão"
+        print(f"Presets disponíveis ({label}):")
         for name in PRESETS:
             print(f"  {name}")
         return 0
@@ -352,7 +361,7 @@ def main():
         print(f"{'='*60}")
         print(f"Preset: {preset_name}  ({args.runs} rodadas)")
         print(f"{'='*60}")
-        preset_args = preset_to_args(preset_name)
+        preset_args = preset_to_args(preset_name, PRESETS)
 
         def _get_handles():
             return (

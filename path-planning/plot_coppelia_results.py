@@ -19,34 +19,44 @@ import sys
 # ---------------------------------------------------------------------------
 
 PRESET_LABELS = {
-    "rrt":                    "RRT",
-    "rrt_star":               "RRT*",
-    "informed_rrt_star":      "Informed RRT*",
-    "rrt_connect_fast":       "RRT-Connect\n(rápido)",
-    "rrt_connect_precise":    "RRT-Connect\n(preciso)",
-    "est_hybrid_exploratory": "HybridEST\n(α=0.70)",
-    "est_hybrid_safe":        "HybridEST\n(α=0.35)",
+    "rrt":                        "RRT",
+    "rrt_star":                   "RRT*",
+    "informed_rrt_star":          "Informed RRT*",
+    "rrt_connect_fast":           "RRT-Connect\n(rápido)",
+    "rrt_connect_precise":        "RRT-Connect\n(preciso)",
+    "est":                        "EST\n(puro)",
+    "est_hybrid_exploratory":     "HybridEST\n(α=0.70)",
+    "est_hybrid_safe":            "HybridEST\n(α=0.35)",
+    # variantes "_fair"
+    "rrt_fair":                       "RRT\n(fair)",
+    "rrt_connect_fair":               "RRT-Connect\n(fair)",
+    "est_hybrid_exploratory_fair":    "HybridEST\n(α=0.70 fair)",
+    "est_hybrid_safe_fair":           "HybridEST\n(α=0.35 fair)",
 }
 
 PRESET_COLORS = {
-    "rrt":                    "#1976D2",
-    "rrt_star":               "#0D47A1",
-    "informed_rrt_star":      "#3949AB",
-    "rrt_connect_fast":       "#29B6F6",
-    "rrt_connect_precise":    "#0288D1",
-    "est_hybrid_exploratory": "#FFA726",
-    "est_hybrid_safe":        "#E65100",
+    "rrt":                        "#1976D2",
+    "rrt_star":                   "#0D47A1",
+    "informed_rrt_star":          "#3949AB",
+    "rrt_connect_fast":           "#29B6F6",
+    "rrt_connect_precise":        "#0288D1",
+    "est":                        "#FF7043",
+    "est_hybrid_exploratory":     "#FFA726",
+    "est_hybrid_safe":            "#E65100",
+    "rrt_fair":                   "#42A5F5",
+    "rrt_connect_fair":           "#4DD0E1",
+    "est_hybrid_exploratory_fair":"#FFB74D",
+    "est_hybrid_safe_fair":       "#BF360C",
 }
 
-# Ordem preferida de exibição (RRT antes de EST)
+# Ordem preferida de exibição
 DISPLAY_ORDER = [
-    "rrt",
-    "rrt_connect_fast",
-    "rrt_connect_precise",
-    "rrt_star",
-    "informed_rrt_star",
-    "est_hybrid_exploratory",
-    "est_hybrid_safe",
+    "rrt", "rrt_fair",
+    "rrt_connect_fast", "rrt_connect_precise", "rrt_connect_fair",
+    "rrt_star", "informed_rrt_star",
+    "est",
+    "est_hybrid_exploratory", "est_hybrid_exploratory_fair",
+    "est_hybrid_safe", "est_hybrid_safe_fair",
 ]
 
 
@@ -403,10 +413,110 @@ def generate_plots(
         saved.append(path4)
         print(f"✓ {path4}")
 
+    # ------------------------------------------------------------------
+    # Figura 5: Timeline por rodada (útil para 1 ou 2 presets)
+    # ------------------------------------------------------------------
+    saved += _plot_per_run(runs_by_preset, presets, colors, output_dir, show)
+
     if show:
         plt.show()
     else:
         plt.close("all")
+
+    return saved
+
+
+def _plot_per_run(runs_by_preset, presets, colors, output_dir, show):
+    """Gráfico de barras por rodada individual para cada preset."""
+    try:
+        import matplotlib
+        if not show:
+            matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+    except ImportError:
+        return []
+
+    saved = []
+    for preset, color in zip(presets, colors):
+        runs = runs_by_preset[preset]
+        n = len(runs)
+        if n == 0:
+            continue
+
+        plan_times = [r["planning_time_s"] for r in runs]
+        exec_times = [r["execution_time_s"] for r in runs]
+        successes  = [r["success"] for r in runs]
+        bar_colors = [color if ok else "#cccccc" for ok in successes]
+
+        fig, axes = plt.subplots(2, 1, figsize=(max(8, n * 0.7 + 2), 7), sharex=True)
+        label = _label(preset).replace("\n", " ")
+        fig.suptitle(f"Resultados por Rodada — {label}", fontsize=12, fontweight="bold")
+
+        x = np.arange(1, n + 1)
+
+        # ── Planejamento ──────────────────────────────────────────────
+        bars0 = axes[0].bar(x, plan_times, color=bar_colors, width=0.6, zorder=3)
+        valid_plan = [t for t in plan_times if not math.isnan(t)]
+        if valid_plan:
+            mean_p = sum(valid_plan) / len(valid_plan)
+            axes[0].axhline(mean_p, color=color, linewidth=1.8,
+                            linestyle="--", label=f"Média: {mean_p:.2f}s")
+            axes[0].legend(fontsize=8)
+        axes[0].set_ylabel("Tempo (s)", fontsize=9)
+        axes[0].set_title("Tempo de Planejamento", fontsize=10)
+        axes[0].grid(axis="y", alpha=0.3, zorder=0)
+        axes[0].spines[["top", "right"]].set_visible(False)
+        for bar, val in zip(bars0, plan_times):
+            if not math.isnan(val):
+                axes[0].text(bar.get_x() + bar.get_width() / 2,
+                             bar.get_height() * 1.02,
+                             f"{val:.2f}", ha="center", va="bottom", fontsize=7)
+
+        # ── Execução ──────────────────────────────────────────────────
+        bars1 = axes[1].bar(x, exec_times, color=bar_colors, width=0.6, zorder=3)
+        ok_exec = [t for t, ok in zip(exec_times, successes)
+                   if ok and not math.isnan(t)]
+        if ok_exec:
+            mean_e = sum(ok_exec) / len(ok_exec)
+            axes[1].axhline(mean_e, color=color, linewidth=1.8,
+                            linestyle="--", label=f"Média (sucesso): {mean_e:.2f}s")
+            axes[1].legend(fontsize=8)
+        axes[1].set_ylabel("Tempo (s)", fontsize=9)
+        axes[1].set_title("Tempo de Execução", fontsize=10)
+        axes[1].set_xlabel("Rodada", fontsize=9)
+        axes[1].set_xticks(x)
+        axes[1].grid(axis="y", alpha=0.3, zorder=0)
+        axes[1].spines[["top", "right"]].set_visible(False)
+        for bar, val, ok in zip(bars1, exec_times, successes):
+            if not math.isnan(val) and val > 0:
+                axes[1].text(bar.get_x() + bar.get_width() / 2,
+                             bar.get_height() * 1.02,
+                             f"{val:.1f}", ha="center", va="bottom", fontsize=7)
+
+        # Legenda de cores
+        from matplotlib.patches import Patch
+        legend_elems = [
+            Patch(facecolor=color,   label="Sucesso"),
+            Patch(facecolor="#cccccc", label="Falhou"),
+        ]
+        axes[0].legend(handles=legend_elems + axes[0].get_legend_handles_labels()[0],
+                       fontsize=8, loc="upper right")
+
+        # Taxa de sucesso no título
+        rate = sum(successes) / n * 100
+        fig.text(0.5, 0.01,
+                 f"Taxa de sucesso: {sum(successes)}/{n} ({rate:.0f}%)",
+                 ha="center", fontsize=9, color="#444")
+
+        plt.tight_layout(rect=[0, 0.03, 1, 0.97])
+        safe_name = preset.replace("/", "_")
+        path = os.path.join(output_dir, f"per_run_{safe_name}.png")
+        fig.savefig(path, dpi=180, bbox_inches="tight")
+        saved.append(path)
+        print(f"✓ {path}")
+        if not show:
+            plt.close(fig)
 
     return saved
 

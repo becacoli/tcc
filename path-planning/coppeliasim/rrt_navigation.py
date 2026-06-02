@@ -198,6 +198,22 @@ def main():
     client = RemoteAPIClient(args.host, args.port)
     sim = client.getObject("sim")
 
+    # Garante que a simulação está rodando — sem isso os comandos de motor
+    # não fazem efeito e o robô fica parado / dispara stuck recovery.
+    sim_state = sim.getSimulationState()
+    stopped_val = getattr(sim, "simulation_stopped", 0)
+    paused_val  = getattr(sim, "simulation_paused", 8)
+    if sim_state == stopped_val:
+        print("[info] Simulação parada — iniciando…")
+        sim.startSimulation()
+        import time as _time
+        _time.sleep(0.5)
+    elif sim_state == paused_val:
+        print("[info] Simulação pausada — retomando…")
+        sim.startSimulation()  # também retoma de pausa
+        import time as _time
+        _time.sleep(0.3)
+
     robot = sim.getObject(args.robot_path)
     left_motor = sim.getObject(args.left_motor_path)
     right_motor = sim.getObject(args.right_motor_path)
