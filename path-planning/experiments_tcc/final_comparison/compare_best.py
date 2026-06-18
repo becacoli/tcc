@@ -37,14 +37,21 @@ from sweep import (
 from run_coppelia_batch import reset_and_verify, _sim_is_stopped, _wait_sim_state
 
 
-def load_best(algo: str, scene: str) -> dict:
+def load_best(algo: str, tuning_scene: str) -> dict:
+    """Carrega o JSON do melhor combo encontrado em `tuning_scene`.
+
+    Nota metodológica: usamos os mesmos hiperparâmetros (tunados em UMA cena)
+    para testar em todas as cenas, refletindo um cenário realista onde os
+    parâmetros do planejador são fixados antes do deploy.
+    """
     results_dir = os.path.join(TCC_ROOT, "experiments_tcc", "results")
-    path = os.path.join(results_dir, f"sweep_{algo}_{scene}_best.json")
+    path = os.path.join(results_dir, f"sweep_{algo}_{tuning_scene}_best.json")
     if not os.path.exists(path):
         raise FileNotFoundError(
             f"Best params não encontrados: {path}\n"
-            f"Rode antes: python experiments_tcc/parameter_sweep/sweep.py "
-            f"--algo {algo} --scene {scene}"
+            f"Rode antes o sweep na cena de tuning:\n"
+            f"  python experiments_tcc/parameter_sweep/sweep.py "
+            f"--algo {algo} --scene {tuning_scene}"
         )
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -52,7 +59,13 @@ def load_best(algo: str, scene: str) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(description="Comparação final dos melhores configs.")
-    parser.add_argument("--scene", required=True)
+    parser.add_argument("--scene", required=True,
+                        help="Cena onde rodar os experimentos finais")
+    parser.add_argument("--tuning-scene", default=None,
+                        help="Cena de onde carregar os melhores parâmetros "
+                             "(padrão: igual a --scene). Use a mesma cena de "
+                             "tuning para TODAS as cenas finais, para "
+                             "comparação justa entre algoritmos.")
     parser.add_argument("--runs", type=int, default=20,
                         help="Rodadas por algoritmo (recomendado >= 20 para boxplot)")
     parser.add_argument("--algos", nargs="+",
@@ -64,11 +77,18 @@ def main():
     args = parser.parse_args()
 
     # Carrega melhores params de cada algoritmo
+    tuning_scene = args.tuning_scene or args.scene
+    print(f"Cena de tuning (de onde lê os melhores params): {tuning_scene}")
+    print(f"Cena de teste final (onde roda os experimentos): {args.scene}")
+    if tuning_scene != args.scene:
+        print(f"  → Usando params calibrados em '{tuning_scene}' "
+              f"para testar em '{args.scene}'")
+    print()
     best_configs = {}
     for algo in args.algos:
-        cfg = load_best(algo, args.scene)
+        cfg = load_best(algo, tuning_scene)
         best_configs[algo] = cfg
-        print(f"  [{algo}]  melhor combo: {cfg['combo']}")
+        print(f"  [{algo}]  melhor combo (de {tuning_scene}): {cfg['combo']}")
     print()
 
     # Conexão
