@@ -1,10 +1,10 @@
-Este repositório contém a implementação e a avaliação experimental de três algoritmos clássicos de planejamento de caminhos baseados em amostragem, **RRT**, **RRT-Connect** e **EST**, aplicados à navegação de um robô móvel diferencial **Pioneer P3DX** no simulador **CoppeliaSim**.
+# Avaliação comparativa de algoritmos baseados em amostragem para planejamento de caminhos em robôs móveis
 
-O projeto cobre desde a implementação dos algoritmos até a execução dos experimentos finais com geração de gráficos comparativos.
+Este repositório contém a implementação e a avaliação experimental de três algoritmos clássicos de planejamento de caminhos baseados em amostragem, **RRT**, **RRT-Connect** e **EST**, aplicados à navegação de um robô móvel diferencial **Pioneer P3DX** no simulador **CoppeliaSim**.
 
 ---
 
-## O Que Foi Feito
+## O que foi feito
 
 Durante o desenvolvimento deste TCC, foram realizadas as seguintes etapas:
 
@@ -29,11 +29,19 @@ Duas paredes paralelas formam um corredor que o robô precisa atravessar.
   <img src="path-planning/images/cenas/scene1.png" alt="Cena 1" width="500"/>
 </p>
 
+<p align="center">
+  ▶️ <a href="path-planning/images/videos/scene1_rrt.mp4">Vídeo: robô navegando na Cena 1 (RRT)</a>
+</p>
+
 #### Cena 2: obstáculos arredondados
-Obstáculos arredondados espalhados, com várias rotas possíveis.
+Obstáculos arredondados espalhados.
 
 <p align="center">
   <img src="path-planning/images/cenas/scene2.png" alt="Cena 2" width="500"/>
+</p>
+
+<p align="center">
+  ▶️ <a href="path-planning/images/videos/scene2_rrtconnect.mp4">Vídeo: robô navegando na Cena 2 (RRT-Connect)</a>
 </p>
 
 #### Cena 3: pilares cúbicos dispersos
@@ -43,12 +51,25 @@ Espaço aberto com pilares quadrados distribuídos pela arena.
   <img src="path-planning/images/cenas/scene3.png" alt="Cena 3" width="500"/>
 </p>
 
+<p align="center">
+  ▶️ <a href="path-planning/images/videos/scene3_est.mp4">Vídeo: robô navegando na Cena 3 (EST)</a>
+</p>
+
 #### Cena 4: labirinto
 Labirinto com paredes internas e externas e múltiplas entradas.
 
 <p align="center">
   <img src="path-planning/images/cenas/scene4.png" alt="Cena 4" width="500"/>
 </p>
+
+<p align="center">
+  ▶️ <a href="path-planning/images/videos/scene4_estnoplot.mp4">Vídeo: robô navegando na Cena 4 (EST)</a>
+</p>
+
+<p align="center">
+  ▶️ <a href="path-planning/images/videos/scene4_rrtconnect.mp4">Vídeo: robô navegando na Cena 4 (RRT-Connect)</a>
+</p>
+
 
 ### 3. Integração com o CoppeliaSim
 
@@ -147,7 +168,7 @@ pip install -r requirements.txt
 
 ---
 
-## Como Rodar
+## Como rodar
 
 ### Pré-requisitos
 

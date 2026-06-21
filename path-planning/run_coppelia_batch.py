@@ -4,9 +4,9 @@ Pré-requisito: CoppeliaSim com a cena aberta e simulação em execução.
 
 Exemplos:
   python run_coppelia_batch.py --list
-  python run_coppelia_batch.py --presets rrt rrt_connect_fast --runs 5
+  python run_coppelia_batch.py --presets rrt rrt_connect --runs 5
   python run_coppelia_batch.py --presets all --runs 3 --output results_coppelia.csv
-  python run_coppelia_batch.py --presets rrt rrt_connect_fast est --runs 5 --no-reset
+  python run_coppelia_batch.py --presets rrt rrt_connect est --runs 5 --no-reset
 """
 
 import argparse

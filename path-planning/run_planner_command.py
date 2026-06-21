@@ -2,7 +2,7 @@
 
 Examples:
   python run_planner_command.py list
-  python run_planner_command.py rrt_connect_fast
+  python run_planner_command.py rrt_connect
   python run_planner_command.py est --dry-run
 """
 
@@ -99,7 +99,8 @@ PRESETS = {
         "--linear-speed",
         "0.12",
     ],
-    "rrt_connect_fast": [
+    "rrt_connect": [
+        # Configuração calibrada usada nos experimentos finais do TCC.
         "--algo",
         "rrt_connect",
         *COMMON_SCENE_ARGS,
@@ -110,32 +111,11 @@ PRESETS = {
         "--step-size",
         "1.5",
         "--goal-sample-rate",
-        "0.15",
+        "0.10",
         "--max-iter",
         "8000",
         "--plan-attempts",
         "20",
-        "--waypoint-spacing",
-        "0.06",
-        "--linear-speed",
-        "0.12",
-    ],
-    "rrt_connect_precise": [
-        "--algo",
-        "rrt_connect",
-        *COMMON_SCENE_ARGS,
-        "--robot-radius",
-        "0.18",
-        "--wall-inflate",
-        "0.01",
-        "--step-size",
-        "1.2",
-        "--goal-sample-rate",
-        "0.15",
-        "--max-iter",
-        "12000",
-        "--plan-attempts",
-        "25",
         "--waypoint-spacing",
         "0.06",
         "--linear-speed",
@@ -184,6 +164,8 @@ def main():
     parser = argparse.ArgumentParser(description="Executa presets de planejamento no CoppeliaSim.")
     parser.add_argument("preset", choices=["list", *PRESETS.keys()])
     parser.add_argument("--dry-run", action="store_true", help="Mostra o comando sem executar.")
+    parser.add_argument("--no-plot", action="store_true",
+                        help="Nao abre a janela de visualizacao do planner (util para gravacoes).")
     args, extra_args = parser.parse_known_args()
 
     if args.preset == "list":
@@ -195,10 +177,16 @@ def main():
     if extra_args and extra_args[0] == "--":
         extra_args = extra_args[1:]
 
+    preset_args = list(PRESETS[args.preset])
+
+    # Remove o --plot-planner se --no-plot foi passado
+    if args.no_plot and "--plot-planner" in preset_args:
+        preset_args = [a for a in preset_args if a != "--plot-planner"]
+
     command = [
         sys.executable,
         "coppeliasim/rrt_navigation.py",
-        *PRESETS[args.preset],
+        *preset_args,
         *extra_args,
     ]
 
