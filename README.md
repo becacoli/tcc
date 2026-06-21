@@ -29,9 +29,15 @@ Duas paredes paralelas formam um corredor que o robô precisa atravessar.
   <img src="path-planning/images/cenas/scene1.png" alt="Cena 1" width="500"/>
 </p>
 
+
+<video src="https://github.com/user-attachments/assets/fb46a86c-9a8c-4b4c-8455-cfaebc8eaab5" controls width="500"></video>
 <p align="center">
-  ▶️ <a href="path-planning/images/videos/scene1_rrt.mp4">Vídeo: robô navegando na Cena 1 (RRT)</a>
+Vídeo: robô navegando na Cena 1 (RRT)
 </p>
+
+
+
+
 
 #### Cena 2: obstáculos arredondados
 Obstáculos arredondados espalhados.
@@ -40,8 +46,9 @@ Obstáculos arredondados espalhados.
   <img src="path-planning/images/cenas/scene2.png" alt="Cena 2" width="500"/>
 </p>
 
+<video src="https://github.com/user-attachments/assets/0e4e65a6-7982-4c0f-a2c4-9e8c9ab59523" controls width="500"></video>
 <p align="center">
-  ▶️ <a href="path-planning/images/videos/scene2_rrtconnect.mp4">Vídeo: robô navegando na Cena 2 (RRT-Connect)</a>
+ Vídeo: robô navegando na Cena 2 (RRT-Connect)
 </p>
 
 #### Cena 3: pilares cúbicos dispersos
@@ -51,9 +58,13 @@ Espaço aberto com pilares quadrados distribuídos pela arena.
   <img src="path-planning/images/cenas/scene3.png" alt="Cena 3" width="500"/>
 </p>
 
+
+<video src="https://github.com/user-attachments/assets/eb83e129-1e39-411d-958c-7f49f87d925c" controls width="500"></video>
 <p align="center">
-  ▶️ <a href="path-planning/images/videos/scene3_est.mp4">Vídeo: robô navegando na Cena 3 (EST)</a>
+ Vídeo: robô navegando na Cena 3 (EST)
 </p>
+
+
 
 #### Cena 4: labirinto
 Labirinto com paredes internas e externas e múltiplas entradas.
@@ -62,12 +73,15 @@ Labirinto com paredes internas e externas e múltiplas entradas.
   <img src="path-planning/images/cenas/scene4.png" alt="Cena 4" width="500"/>
 </p>
 
+
+<video src="https://github.com/user-attachments/assets/ffe6167e-996a-40ab-90a5-7a2f11d5a3f4" controls width="500"></video>
 <p align="center">
-  ▶️ <a href="path-planning/images/videos/scene4_estnoplot.mp4">Vídeo: robô navegando na Cena 4 (EST)</a>
+Vídeo: robô navegando na Cena 4 (EST)
 </p>
 
+<video src="https://github.com/user-attachments/assets/ddfed765-4e24-4f7a-bb0b-a130080823c0" controls width="500"></video>
 <p align="center">
-  ▶️ <a href="path-planning/images/videos/scene4_rrtconnect.mp4">Vídeo: robô navegando na Cena 4 (RRT-Connect)</a>
+ Vídeo: robô navegando na Cena 4 (RRT-Connect)
 </p>
 
 
