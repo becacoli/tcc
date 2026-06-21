@@ -17,7 +17,7 @@ import time
 from algorithms.rrt import RRT
 from algorithms.rrt_connect import RRTConnect
 from algorithms.informed_rrt_star import InformedRRTStar
-from algorithms.est import EST, HybridEST
+from algorithms.est import EST
 from algorithms.rrt_merged import RRTMerge
 from algorithms.rrt_star import RRTStar
 from algorithms.rrt_star_smart import RRTStarSmart
@@ -32,7 +32,6 @@ ALGORITHMS = {
     "rrt_merged": RRTMerge,
     "informed_rrt_star": InformedRRTStar,
     "est": EST,
-    "est_hybrid": HybridEST,
     "rrt_star_smart": RRTStarSmart,
 }
 
@@ -134,12 +133,10 @@ def _build_kwargs(name, args):
         base["x_direction"] = args.x_direction
     if name in {"rrt_star", "informed_rrt_star", "rrt_star_smart"}:
         base["neighbor_radius"] = args.neighbor_radius
-    if name in {"est", "est_hybrid"}:
+    if name == "est":
         base["density_radius"] = args.density_radius
         base["local_sample_radius"] = args.local_sample_radius
         base["density_candidates"] = args.density_candidates
-        if name == "est_hybrid":
-            base["global_sample_rate"] = args.global_sample_rate
     if name == "rrt_merged":
         base["connect_threshold"] = args.connect_threshold
     if name == "rrt_star_smart":

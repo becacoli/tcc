@@ -10,7 +10,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from algorithms.informed_rrt_star import InformedRRTStar
-from algorithms.est import EST, HybridEST
+from algorithms.est import EST
 from algorithms.rrt import RRT
 from algorithms.rrt_connect import RRTConnect
 from algorithms.rrt_star import RRTStar
@@ -29,7 +29,6 @@ ALGORITHMS = {
     "rrt_connect": RRTConnect,
     "informed_rrt_star": InformedRRTStar,
     "est": EST,
-    "est_hybrid": HybridEST,
     "rrt_star_smart": RRTStarSmart,
 }
 
@@ -37,7 +36,7 @@ ALGORITHMS = {
 def add_planner_arguments(parser):
     parser.add_argument(
         "--algo",
-        choices=["rrt", "rrt_star", "rrt_connect", "informed_rrt_star", "rrt_star_smart", "est", "est_hybrid"],
+        choices=["rrt", "rrt_star", "rrt_connect", "informed_rrt_star", "rrt_star_smart", "est"],
         default="rrt",
     )
     parser.add_argument("--max-iter", type=int, default=1000)
@@ -260,12 +259,10 @@ def plan_path_independent(context, args):
     if algo_name in {"rrt_star", "informed_rrt_star", "rrt_star_smart"}:
         kwargs["neighbor_radius"] = args.neighbor_radius
 
-    if algo_name in {"est", "est_hybrid"}:
+    if algo_name == "est":
         kwargs["density_radius"] = args.density_radius
         kwargs["local_sample_radius"] = args.local_sample_radius
         kwargs["density_candidates"] = args.density_candidates
-        if algo_name == "est_hybrid":
-            kwargs["global_sample_rate"] = args.global_sample_rate
 
     if algo_name == "rrt_star_smart":
         kwargs["beacon_sample_rate"] = args.beacon_sample_rate

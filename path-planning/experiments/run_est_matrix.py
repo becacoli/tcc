@@ -12,7 +12,7 @@ import random
 import statistics
 import time
 
-from algorithms.est import EST, HybridEST
+from algorithms.est import EST
 from algorithms.informed_rrt_star import InformedRRTStar
 from algorithms.rrt import RRT
 from algorithms.rrt_connect import RRTConnect
@@ -27,7 +27,6 @@ ALGORITHMS = {
     "rrt_star": RRTStar,
     "informed_rrt_star": InformedRRTStar,
     "est": EST,
-    "est_hybrid": HybridEST,
 }
 
 
@@ -45,12 +44,10 @@ def build_kwargs(name, args):
     if name in {"rrt_star", "informed_rrt_star"}:
         kwargs["neighbor_radius"] = args.neighbor_radius
 
-    if name in {"est", "est_hybrid"}:
+    if name == "est":
         kwargs["density_radius"] = args.density_radius
         kwargs["local_sample_radius"] = args.local_sample_radius
         kwargs["density_candidates"] = args.density_candidates
-        if name == "est_hybrid":
-            kwargs["global_sample_rate"] = args.global_sample_rate
 
     return kwargs
 
@@ -136,7 +133,7 @@ def summarize(rows):
 
 def main():
     parser = argparse.ArgumentParser(description="Executa matriz de comparação para o TCC.")
-    parser.add_argument("--algorithms", nargs="+", default=["rrt", "rrt_connect", "rrt_star", "est", "est_hybrid"])
+    parser.add_argument("--algorithms", nargs="+", default=["rrt", "rrt_connect", "rrt_star", "est"])
     parser.add_argument("--scenarios", nargs="+", default=["simples", "moderado", "corredor", "passagem_estreita"])
     parser.add_argument("--runs", type=int, default=30)
     parser.add_argument("--seed", type=int, default=0)

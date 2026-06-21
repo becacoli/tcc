@@ -194,12 +194,3 @@ class EST:
             if path:
                 return path
         return None
-
-
-class HybridEST(EST):
-    """EST com componente de amostragem global. Existe uma chance fixa
-    de amostragem global, além da expansão por baixa densidade do EST.
-    """
-
-    def __init__(self, *args, global_sample_rate=0.15, **kwargs):
-        super().__init__(*args, global_sample_rate=global_sample_rate, **kwargs)
