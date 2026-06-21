@@ -113,7 +113,7 @@ Os experimentos comparativos foram organizados na pasta `path-planning/experimen
 
 ---
 
-## Tecnologias Utilizadas
+## Tecnologias/Libs Utilizadas
 
 - **Python 3** — linguagem principal
 - **CoppeliaSim** (antigo V-REP) — simulador robótico
